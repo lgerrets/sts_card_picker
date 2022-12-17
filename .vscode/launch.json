@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "Python : deck_history",
+            "type": "python",
+            "request": "launch",
+            "program": "sts_ml/deck_history.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Python : train",
+            "type": "python",
+            "request": "launch",
+            "program": "sts_ml/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}

@@ -1,0 +1,2 @@
+- Card names in .run files have no standardized format. I should format those as early as possible in pipeline.
+- For now we drop out samples from the dataset that contain unknown cards

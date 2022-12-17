@@ -1,2 +1,4 @@
 env
 Baalor400/
+**/*.pyc
+**/__pycache__
