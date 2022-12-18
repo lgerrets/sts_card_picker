@@ -19,6 +19,16 @@
             "justMyCode": true,
             "cwd": "${workspaceFolder}",
             "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Python : infer",
+            "type": "python",
+            "request": "launch",
+            "program": "sts_ml/infer.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env"
         }
     ]
 }

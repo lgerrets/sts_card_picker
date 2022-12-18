@@ -2,3 +2,5 @@ env
 Baalor400/
 **/*.pyc
 **/__pycache__
+**/*.ckpt
+**/*.png
