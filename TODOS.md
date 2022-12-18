@@ -6,5 +6,4 @@
 ## Model training
 
 - I'm padding the entire dataset once to minimize out of distribution but this may be bad for perf and generalize poorly?
-- Model does not see upgrades.
 - Support configurable stateful experiment parameters

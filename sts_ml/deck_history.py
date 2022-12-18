@@ -29,9 +29,16 @@ ALL_CARDS_FORMATTED = [format_string(_) for _ in ALL_CARDS]
 
 DUMMY_DICT = {}
 
-def card_to_name(card : str):
+def card_to_name(card : str) -> str:
     name = card.split("+")[0]
     return name
+
+def card_to_n_upgrades(card : str) -> int:
+    splits = card.split("+")
+    if len(splits) > 1:
+        return int(splits[1])
+    else:
+        return 0
     
 def add_card(deck : List[str], card : str, modifiers=DUMMY_DICT):
     if is_a_card(card): # don't add potions and relics

@@ -8,7 +8,7 @@ from torch.distributions import Categorical
 from datetime import datetime
 import matplotlib.pyplot as plt
 
-from sts_ml.deck_history import ALL_CARDS_FORMATTED, card_to_name
+from sts_ml.deck_history import ALL_CARDS_FORMATTED, card_to_name, card_to_n_upgrades
 
 ALL_TOKENS = ["PAD_TOKEN"] + ALL_CARDS_FORMATTED
 
@@ -44,9 +44,9 @@ class Model(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         
-        self.dim = dim = 64
+        self.dim = dim = 256
         self.embedding = nn.Embedding(len(ALL_TOKENS), dim)
-        blocks = [Block(dim, 2*dim) for _ in range(4)]
+        blocks = [Block(dim, 2*dim, 4) for _ in range(4)]
         self.blocks = nn.Sequential(*blocks)
         self.projection = nn.Linear(dim, 2)
 
@@ -55,11 +55,13 @@ class Model(nn.Module):
 
         self.opt = torch.optim.Adam(self.parameters(), lr=1e-4)
 
-    def forward(self, idxes, deck_sizes):
+    def forward(self, idxes : torch.tensor, deck_sizes : np.ndarray, n_upgrades : torch.tensor):
         feat = self.embedding(idxes)
+        n_upgrades = torch.clip(n_upgrades, 0, 1)
         for idx, deck_size in enumerate(deck_sizes):
             feat[idx,:deck_size,-1] = 0
             feat[idx,deck_size:,-1] = 1
+            feat[idx,:,-2] = n_upgrades[idx]
         feat = self.blocks(feat)
         feat = self.projection(feat)
         logits = torch.softmax(feat, dim=2)
@@ -92,17 +94,19 @@ class Model(nn.Module):
         padded_samples = pad_samples(samples)
         batched_idxes = []
         deck_sizes = []
+        n_upgrades = []
         for sample in padded_samples:
-            deck_idxes = [token_to_index(token) for token in sample["deck"]]
-            picked_idxes = [token_to_index(token) for token in sample["cards_picked"]]
-            skipped_idxes = [token_to_index(token) for token in sample["cards_skipped"]]
-            idxes = deck_idxes + picked_idxes + skipped_idxes
+            tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
+            idxes = [token_to_index(token) for token in tokens]
             batched_idxes.append(idxes)
-            deck_sizes.append(len(deck_idxes))
+            deck_sizes.append(len(sample["deck"]))
+            n_upgrades.append([card_to_n_upgrades(token) for token in tokens])
         batched_idxes = np.array(batched_idxes)
         batched_idxes = torch.from_numpy(batched_idxes).to(self.device)
         deck_sizes = np.array(deck_sizes)
-        logits = self.forward(batched_idxes, deck_sizes=deck_sizes)
+        n_upgrades = np.array(n_upgrades)
+        n_upgrades = torch.from_numpy(n_upgrades).to(self.device)
+        logits = self.forward(batched_idxes, deck_sizes=deck_sizes, n_upgrades=n_upgrades)
         return logits
     
     def predict(self, sample : dict):
@@ -128,10 +132,10 @@ class Model(nn.Module):
         print(df)
 
 class Block(nn.Module):
-    def __init__(self, dim, ffdim) -> None:
+    def __init__(self, dim, ffdim, nheads=4) -> None:
         super().__init__()
         self.dim = dim
-        self.att = nn.MultiheadAttention(dim, 2, batch_first=True)
+        self.att = nn.MultiheadAttention(dim, nheads, batch_first=True)
         self.ln1 = nn.LayerNorm(dim)
         self.ff1 = nn.Linear(dim, ffdim)
         self.relu = nn.ReLU()
@@ -164,7 +168,7 @@ def main():
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     losses = []
-    n_epochs = 300
+    n_epochs = 1000
     ckpt_idxes = gen_ckpt_idxes()
     next_epock_save_idx = next(ckpt_idxes)
     for epoch in range(n_epochs):
@@ -173,13 +177,13 @@ def main():
         print(epoch, total_loss)
         if epoch == next_epock_save_idx:
             next_epock_save_idx = next(ckpt_idxes)
-            torch.save(model.state_dict(), f"{timestamp}_padDataset_posEmb_{epoch}.ckpt")
+            torch.save(model.state_dict(), f"{timestamp}_padDataset_posEmb_upgrades_{epoch}.ckpt")
 
-    torch.save(model.state_dict(), f"{timestamp}_padDataset_posEmb_{epoch}.ckpt")
+    torch.save(model.state_dict(), f"{timestamp}_padDataset_posEmb_upgrades_{epoch}.ckpt")
 
     plt.plot(np.arange(n_epochs), losses)
-    plt.show()
     plt.savefig(f"{timestamp}.png")
+    plt.show()
 
     model.eval()
     
