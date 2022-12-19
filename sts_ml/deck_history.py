@@ -1,3 +1,4 @@
+
 import copy
 from tkinter import ALL
 import numpy as np
@@ -28,6 +29,7 @@ def format_string(card_name : str):
 ALL_CARDS_FORMATTED = [format_string(_) for _ in ALL_CARDS]
 
 DUMMY_DICT = {}
+DUMMY_LIST = []
 
 def card_to_name(card : str) -> str:
     name = card.split("+")[0]
@@ -76,12 +78,149 @@ def upgrade_card(deck : List[str], card : str):
     card = f"{name}+{n_upgrades+1}"
     add_card(deck, card)
 
-def rebuild_deck(data : dict, draft_dataset : list):
-    if not data["is_ascension_mode"]: return
-    if data["character_chosen"] != "IRONCLAD": return
-    if data["ascension_level"] < 10: return
-    if not data["victory"]: return
+class Certainty:
+    (DEFINITELY, MAYBE) = range(2)
 
+class CardInformation:
+    (ATTACK, SKILL) = range(2)
+
+class UndeterminedCard:
+    def __init__(self, certainty : Certainty, card_info : CardInformation):
+        self.certainty = certainty
+        self.card_info = card_info
+
+class FloorDelta:
+    DEFINITELY_SOMETHING = format_string("DEFINITELY_SOMETHING")
+    MAYBE_SOMETHING = format_string("MAYBE_SOMETHING")
+
+    def __init__(
+        self,
+        floor : int,
+        cards_added : List[str] = DUMMY_LIST,
+        cards_removed : List[str] = DUMMY_LIST,
+        cards_upgraded : List[str] = DUMMY_LIST,
+        cards_transformed : List[str] = DUMMY_LIST,
+        cards_skipped : List[str] = DUMMY_LIST,
+        relics_added : List[str] = DUMMY_LIST,
+        relics_removed : List[str] = DUMMY_LIST,
+        gold_delta : int = 0,
+        hp_delta : int = 0,
+    ):
+        self.floor = floor
+        self.cards_added = [format_string(_) for _ in cards_added]
+        self.cards_removed = [format_string(_) for _ in cards_removed]
+        self.cards_upgraded = [format_string(_) for _ in cards_upgraded]
+        self.cards_transformed = [format_string(_) for _ in cards_transformed]
+        self.cards_skipped = [format_string(_) for _ in cards_skipped]
+        self.relics_added = [format_string(_) for _ in relics_added]
+        self.relics_removed = [format_string(_) for _ in relics_removed]
+        self.gold_delta = gold_delta
+        self.hp_delta = hp_delta
+
+class History:
+    def __init__(self):
+        self.floor_deltas : List[FloorDelta] = []
+    
+    def add(self, floor_delta : FloorDelta):
+        self.floor_deltas.append(floor_delta)
+
+        if "pandora'sbox" in floor_delta.relics_added:
+        # UndeterminedCard
+
+                # elif relic == "Pandora's Box":
+                #     for card in data["relic_stats"]["Pandora's Box"]:
+                #         add_card(deck, card)
+                #     for card_to_remove in ["Strike_R", "Defend_R"]:
+                #         while 1:
+                #             if not card_name_in_deck(deck, card_to_remove):
+                #                 break
+                #             remove_card(deck, card_to_remove)
+                # elif relic == "Astrolabe":
+                #     for card in data["relic_stats"]["Astrolabe"]: # NOTE: Astrolabe does not record which cards were removed
+                #         add_card(deck, card)
+                #         upgrade_card(deck, card)
+    
+                # NOTE: tiny house does not record which card was upgraded
+
+        # if "Whetstone" in relics_obtained:
+        #     for card in data["relic_stats"]["Whetstone"]:
+        #         upgrade_card(deck, card)
+        # if "War Paint" in relics_obtained:
+        #     for card in data["relic_stats"]["War Paint"]:
+        #         upgrade_card(deck, card)
+    
+    def wrap_up(self, master_deck : List[str]):
+        master_deck = [format_string(_) for _ in master_deck]
+
+        deck = ["Defend_R"]*4 + ["Strike_R"]*5 + ["Bash", "AscendersBane"]
+        modifiers = {}
+
+                # if relic == "Omamori":
+                #     modifiers["omamori_counter"] = 2
+
+def rebuild_deck_from_vanilla_run(data : dict, draft_dataset : list):
+    history = History()
+
+    ### TODO: Neow
+
+    floor = 0
+    for node in data["path_per_floor"]:
+        floor += 1
+        floor_delta = {}
+
+        for card_choice in data["card_choices"]:
+            if card_choice["floor"] == floor:
+                got_at_least_one_reward = True
+                if card_choice["picked"] not in ["SKIP", "Singing Bowl"]:
+                    floor_delta["cards_added"] = floor_delta.get("cards_added", []) + [card_choice["picked"]]
+                floor_delta["cards_skipped"] = floor_delta.get("cards_skipped", []) + [card_choice["not_picked"]]
+        
+        if (node == "M") or (node == "E") or (node == "B") or (node == "NEOW"):
+            pass
+        elif node == "?":
+            for event_choice in data["event_choices"]:
+                if event_choice["floor"] == floor:
+                    if "cards_obtained" in event_choice:
+                        for card in event_choice["cards_obtained"]:
+                            floor_delta["cards_added"] = floor_delta.get("cards_added", []) + [card]
+                    if "cards_upgraded" in event_choice:
+                        for card in event_choice["cards_upgraded"]:
+                            floor_delta["cards_ugraded"] = floor_delta.get("cards_ugraded", []) + [card]
+                    if "cards_removed" in event_choice:
+                        for card in event_choice["cards_removed"]:
+                            floor_delta["cards_removed"] = floor_delta.get("cards_removed", []) + [card]
+                    if "cards_transformed" in event_choice:
+                        for card in event_choice["cards_transformed"]:
+                            floor_delta["cards_transformed"] = floor_delta.get("cards_transformed", []) + [card]
+        elif node == "R":
+            for campfire_choice in data["campfire_choices"]:
+                if campfire_choice["floor"] == floor:
+                    assert campfire_choice["key"] in ["REST", "SMITH", "RECALL", "DIG", "LIFT", "PURGE"], campfire_choice["key"]
+                    if campfire_choice["key"] == "SMITH":
+                        floor_delta["cards_ugraded"] = floor_delta.get("cards_ugraded", []) + [campfire_choice["data"]]
+                    elif campfire_choice["key"] == "PURGE":
+                        floor_delta["cards_removed"] = floor_delta.get("cards_removed", []) + [campfire_choice["data"]]
+        elif node == "T":
+            pass
+        elif node == "$":
+            for purged_card, purged_floor in zip(data["items_purged"], data["items_purged_floors"]):
+                if purged_floor == floor:
+                    floor_delta["cards_removed"] = floor_delta.get("cards_removed", []) + [purged_card]
+            for purchased_card, purchase_floor in zip(data["items_purchased"], data["item_purchase_floors"]):
+                if purchase_floor == floor:
+                    floor_delta["cards_added"] = floor_delta.get("cards_added", []) + [purchased_card]
+        elif node is None:
+            pass
+        else:
+            assert False, node
+        
+        history.add(floor_delta)
+
+    master_deck = data["master_deck"]
+    history.wrap_up(master_deck)
+
+
+def rebuild_deck(data : dict, draft_dataset : list):
     deck = ["Defend_R"]*4 + ["Strike_R"]*5 + ["Bash", "AscendersBane"]
     modifiers = {}
 
@@ -94,13 +233,9 @@ def rebuild_deck(data : dict, draft_dataset : list):
     for card in data["neow_bonus_log"]["cardsTransformed"]:
         remove_card(deck, card)
 
-    node_to_index = defaultdict(lambda: 0)
-
     floor = -1
     for node in ["NEOW"] + data["path_per_floor"]:
         floor += 1
-        index = node_to_index[node]
-        node_to_index[node] += 1
         draft_data = {}
 
         relics_obtained = []
@@ -195,6 +330,11 @@ def rebuild_deck(data : dict, draft_dataset : list):
         print(f"Expected {len(master_deck)} != {len(deck)} cards")
 
 def try_rebuild_deck(data, draft_dataset):
+    if not data["is_ascension_mode"]: return
+    if data["character_chosen"] != "IRONCLAD": return
+    if data["ascension_level"] < 10: return
+    if not data["victory"]: return
+
     try:
         rebuild_deck(data, draft_dataset)
     except Exception as e:
@@ -233,7 +373,16 @@ def main():
     json.dump(draft_dataset, open("./draft_dataset.data", "w"), indent=4)
     print(f"Dumped dataset of {len(draft_dataset)} draft decisions")
 
+def main2():
+    draft_dataset = []
+    datas = json.load(open("./2019-05-31-00-53#1028.json", "r"))
+    for data in datas:
+        assert set(data.keys()) == {'event'}
+        data = data["event"]
+        try_rebuild_deck(data, draft_dataset)
+
 if __name__ == "__main__":
-    main()
+    # main()
+    main2()
 
 
