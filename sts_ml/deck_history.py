@@ -77,11 +77,10 @@ def upgrade_card(deck : List[str], card : str):
     add_card(deck, card)
 
 def rebuild_deck(data : dict, draft_dataset : list):
-    assert data["is_ascension_mode"]
-    assert data["character_chosen"] == "IRONCLAD"
-    assert data["ascension_level"] == 20
-    # assert data["victory"]
-    # assert len(data["path_per_floor"]) == 57
+    if not data["is_ascension_mode"]: return
+    if data["character_chosen"] != "IRONCLAD": return
+    if data["ascension_level"] < 10: return
+    if not data["victory"]: return
 
     deck = ["Defend_R"]*4 + ["Strike_R"]*5 + ["Bash", "AscendersBane"]
     modifiers = {}
@@ -194,6 +193,14 @@ def rebuild_deck(data : dict, draft_dataset : list):
         print(f"{master_deck_set.difference(deck_set)} should have been added, {deck_set.difference(master_deck_set)} should have been removed")
     elif len(deck) != len(master_deck):
         print(f"Expected {len(master_deck)} != {len(deck)} cards")
+
+def try_rebuild_deck(data, draft_dataset):
+    try:
+        rebuild_deck(data, draft_dataset)
+    except Exception as e:
+        json.dump(data, open("./example_ironclad.run", "w"), indent=4)
+        print("dumped to example_ironclad.run")
+        raise e
     
 def main():
     directory = "./Baalor400/Wins 201-400/IRONCLAD"
@@ -203,13 +210,13 @@ def main():
     print(f"Analysing {len(files)} files")
     for idx, filename in enumerate(files):
         data = json.load(open(os.path.join(directory, filename), "r"))
-        try:
-            rebuild_deck(data, draft_dataset)
-        except Exception as e:
-            print(idx, filename)
-            json.dump(data, open("./example_ironclad.run", "w"), indent=4)
-            print("dumped to example_ironclad.run")
-            raise e
+        try_rebuild_deck(data, draft_dataset)
+    
+    datas = json.load(open("./2019-05-31-00-53#1028.json", "r"))
+    for data in datas:
+        assert set(data.keys()) == {'event'}
+        data = data["event"]
+        try_rebuild_deck(data, draft_dataset)
     
     idx = len(draft_dataset) - 1
     while idx > -1:
