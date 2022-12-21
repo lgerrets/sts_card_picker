@@ -167,9 +167,7 @@ class History:
 
         self.update_state_from_deltas(floor_state, floor_delta)
         
-        if (self.last_resolved_floor_delta_idx == len(self.floor_deltas) - 2) and (not floor_delta.is_unresolved()):
-            self.last_resolved_floor_delta_idx += 1
-        if floor_delta.is_unresolved() and (self.last_resolved_floor_delta_idx < len(self.floor_deltas) - 1):
+        if self.last_resolved_floor_delta_idx < floor_delta.floor:
             self.bakward_forward()
     
     def update_state_from_deltas(self, floor_state : FloorState, floor_delta : FloorDelta, correcting_floor_delta : FloorDelta = None):
@@ -278,6 +276,9 @@ class History:
             else:
                 floor_delta.unresolved_transformed_cards.append(card)
 
+        if (self.last_resolved_floor_delta_idx == floor_delta.floor) and floor_delta.is_unresolved():
+            self.last_resolved_floor_delta_idx += 1
+
     def bakward_forward(self, delta_to_master : FloorDelta = None):
         if delta_to_master is None:
             accumulated_delta = FloorDelta(floor=None)
@@ -299,13 +300,23 @@ class History:
             accumulated_delta = delta_to_master
         
         forward_delta_idx = len(self.floor_deltas)
-        floor_state = self.floor_states[forward_delta_idx - 1]
 
+        # resolve issues at latest floors first (probably better because it's closer to the ground truth master_deck ?)
         while forward_delta_idx > self.last_resolved_floor_delta_idx + 1:
             forward_delta_idx -= 1
             floor_delta = self.floor_deltas[forward_delta_idx]
-            floor_state = copy.deepcopy(floor_state)
-            self.update_state_from_deltas(floor_state, floor_delta, accumulated_delta)
+            floor_state = self.floor_states[forward_delta_idx]
+            next_floor_state = copy.deepcopy(floor_state)
+            self.update_state_from_deltas(next_floor_state, floor_delta, accumulated_delta)
+            if next_floor_state.cards != self.floor_states[forward_delta_idx + 1].cards: # noticed an update, let's propagate to later floor
+                self.floor_states[forward_delta_idx + 1] = next_floor_state
+                forward_pass_idx = forward_delta_idx + 1
+                while forward_pass_idx < len(self.floor_states) - 1:
+                    next_floor_state = copy.deepcopy(self.floor_states[forward_pass_idx])
+                    floor_delta = self.floor_deltas[forward_pass_idx]
+                    self.update_state_from_deltas(next_floor_state, floor_delta, accumulated_delta)
+                    self.floor_states[forward_pass_idx + 1] = next_floor_state
+                    forward_pass_idx += 1
     
     def wrap_up(self, master_deck : List[str]):
         master_deck = [format_string(_) for _ in master_deck]
@@ -324,17 +335,24 @@ class History:
                 infered_deck_copy.pop(idx)
             else:
                 idx += 1
-        while len(infered_deck_copy):
-            card = infered_deck_copy.pop(0)
-            assert card not in master_deck_copy
+        idx = 0
+        while idx < len(infered_deck_copy):
+            card = infered_deck_copy[idx]
             if card_to_upgrade(card) in master_deck_copy:
                 master_deck_copy.remove(card_to_upgrade(card))
                 delta_to_master.cards_upgraded.append(card)
+                infered_deck_copy.pop(idx)
             else:
-                delta_to_master.cards_removed_or_transformed.append(card)
+                idx += 1
         while len(master_deck_copy):
             card = master_deck_copy.pop(0)
             delta_to_master.cards_added.append(card)
+            if DEFINITELY_SOMETHING in infered_deck_copy:
+                infered_deck_copy.remove(DEFINITELY_SOMETHING)
+        while len(infered_deck_copy):
+            card = infered_deck_copy.pop(0)
+            if card != DEFINITELY_SOMETHING:
+                delta_to_master.cards_removed_or_transformed.append(card)
 
         self.bakward_forward(delta_to_master)
 
@@ -433,12 +451,6 @@ def rebuild_deck_from_vanilla_run(data : dict, draft_dataset : list):
     master_deck = data["master_deck"]
     delta_to_master = history.wrap_up(master_deck)
 
-    while DEFINITELY_SOMETHING in delta_to_master.cards_added:
-        delta_to_master.cards_added.remove(DEFINITELY_SOMETHING)
-    while DEFINITELY_SOMETHING in delta_to_master.cards_removed_or_transformed:
-        delta_to_master.cards_removed_or_transformed.remove(DEFINITELY_SOMETHING)
-    while DEFINITELY_SOMETHING in delta_to_master.cards_upgraded:
-        delta_to_master.cards_upgraded.remove(DEFINITELY_SOMETHING)
 
     return (len(delta_to_master.cards_added) == 0) and (len(delta_to_master.cards_removed_or_transformed) == 0) and (len(delta_to_master.cards_upgraded) == 0), delta_to_master
 
