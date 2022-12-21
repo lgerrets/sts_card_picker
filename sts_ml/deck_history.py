@@ -8,15 +8,20 @@ import os, os.path
 from collections import defaultdict
 
 IRONCLAD_CARDS = ["Strike_R", "Defend_R", "Bash", "Anger", "Body Slam", "Clash", "Cleave", "Clothesline", "Headbutt", "Heavy Blade", "Iron Wave", "Perfected Strike", "Pommel Strike", "Sword Boomerang", "Thunderclap", "Twin Strike", "Wild Strike", "Blood for Blood", "Carnage", "Dropkick", "Hemokinesis", "Pummel", "Rampage", "Reckless Charge", "Searing Blow", "Sever Soul", "Uppercut", "Whirlwind", "Bludgeon", "Feed", "Fiend Fire", "Immolate", "Reaper", "Armaments", "Flex", "Havoc", "Shrug It Off", "True Grit", "Warcry", "Battle Trance", "Bloodletting", "Burning Pact", "Disarm", "Dual Wield", "Entrench", "Flame Barrier", "Ghostly Armor", "Infernal Blade", "Intimidate", "Power Through", "Rage", "Second Wind", "Seeing Red", "Sentinel", "Shockwave", "Spot Weakness", "Double Tap", "Exhume", "Impervious", "Limit Break", "Offering", "Combust", "Dark Embrace", "Evolve", "Feel No Pain", "Fire Breathing", "Inflame", "Metallicize", "Rupture", "Barricade", "Berserk", "Brutality", "Corruption", "Demon Form", "Juggernaut", ]
-SILENT_CARDS = ["Strike", "Defend", "Neutralize", "Survivor", "Bane", "Dagger Spray", "Dagger Throw", "Flying Knee", "Poisoned Stab", "Quick Slash", "Slice", "Sneaky Strike", "Sucker Punch", "All-Out Attack", "Backstab", "Choke", "Dash", "Endless Agony", "Eviscerate", "Finisher", "Flechettes", "Heel Hook", "Masterful Stab", "Predator", "Riddle with Holes", "Skewer", "Die Die Die", "Glass Knife", "Grand Finale", "Unload", "Acrobatics", "Backflip", "Blade Dance", "Cloak and Dagger", "Deadly Poison", "Deflect", "Dodge and Roll", "Outmaneuver", "Piercing Wail", "Prepared", "Blur", "Bouncing Flask", "Calculated Gamble", "Catalyst", "Concentrate", "Crippling Cloud", "Distraction", "Escape Plan", "Expertise", "Leg Sweep", "Reflex", "Setup", "Tactician", "Terror", "Adrenaline", "Alchemize", "Bullet Time", "Burst", "Corpse Explosion", "Doppelganger", "Malaise", "Nightmare", "Phantasmal Killer", "Storm of Steel", "Accuracy", "Caltrops", "Footwork", "Infinite Blades", "Noxious Fumes", "Well-Laid Plans", "A Thousand Cuts", "After Image", "Envenom", "Tools of the Trade", "Wraith Form",]
-DEFECT_CARDS = ["Strike", "Defend", "Dualcast", "Zap", "Ball Lightning", "Barrage", "Beam Cell", "Claw", "Cold Snap", "Compile Driver", "Go for the Eyes", "Rebound", "Streamline", "Sweeping Beam", "Blizzard", "Bullseye", "Doom and Gloom", "FTL", "Melter", "Rip and Tear", "Scrape", "Sunder", "All for One", "Core Surge", "Hyperbeam", "Meteor Strike", "Thunder Strike", "Charge Battery", "Coolheaded", "Hologram", "Leap", "Recursion", "Stack", "Steam Barrier", "TURBO", "Aggregate", "Auto-Shields", "Boot Sequence", "Chaos", "Chill", "Consume", "Darkness", "Double Energy", "Equilibrium", "Force Field", "Fusion", "Genetic Algorithm", "Glacier", "Overclock", "Recycle", "Reinforced Body", "Reprogram", "Skim", "Tempest", "White Noise", "Amplify", "Fission", "Multi-Cast", "Rainbow", "Reboot", "Seek", "Capacitor", "Defragment", "Heatsinks", "Hello World", "Loop", "Self Repair", "Static Discharge", "Storm", "Biased Cognition", "Buffer", "Creative AI", "Echo Form", "Electrodynamics", "Machine Learning", ]
+SILENT_CARDS = ["Strike", "Defend", "Neutralize", "Survivor", "Bane", "Dagger Spray", "Dagger Throw", "Flying Knee", "Poisoned Stab", "Quick Slash", "Slice", "Sneaky Strike", "Sucker Punch", "All-Out Attack", "Backstab", "Choke", "Dash", "Endless Agony", "Eviscerate", "Finisher", "Flechettes", "Heel Hook", "Masterful Stab", "Predator", "Riddle with Holes", "Skewer", "Die Die Die", "Glass Knife", "Grand Finale", "Unload", "Acrobatics", "Backflip", "Blade Dance", "Cloak and Dagger", "Deadly Poison", "Deflect", "Dodge and Roll", "Outmaneuver", "Piercing Wail", "Prepared", "Blur", "Bouncing Flask", "Calculated Gamble", "Catalyst", "Concentrate", "Crippling Cloud", "Distraction", "Escape Plan", "Expertise", "Leg Sweep", "Reflex", "Setup", "Tactician", "Terror", "Adrenaline", "Alchemize", "Bullet Time", "Burst", "Corpse Explosion", "Doppelganger", "Malaise", "Nightmare", "Phantasmal Killer", "Storm of Steel", "Accuracy", "Caltrops", "Footwork", "Infinite Blades", "Noxious Fumes", "Well Laid Plans", "A Thousand Cuts", "After Image", "Envenom", "Tools of the Trade", "Wraith Form",]
+DEFECT_CARDS = ["Strike", "Defend", "Dualcast", "Zap", "Ball Lightning", "Barrage", "Beam Cell", "Claw", "Cold Snap", "Compile Driver", "Go for the Eyes", "Rebound", "Streamline", "Sweeping Beam", "Blizzard", "Bullseye", "Doom and Gloom", "FTL", "Melter", "Rip and Tear", "Scrape", "Sunder", "All for One", "Core Surge", "Hyperbeam", "Meteor Strike", "Thunder Strike", "Charge Battery", "Coolheaded", "Hologram", "Leap", "Recursion", "Stack", "Steam Barrier", "TURBO", "Aggregate", "Auto Shields", "Boot Sequence", "Chaos", "Chill", "Consume", "Darkness", "Double Energy", "Equilibrium", "Force Field", "Fusion", "Genetic Algorithm", "Glacier", "Overclock", "Recycle", "Reinforced Body", "Reprogram", "Skim", "Tempest", "White Noise", "Amplify", "Fission", "Multi-Cast", "Rainbow", "Reboot", "Seek", "Capacitor", "Defragment", "Heatsinks", "Hello World", "Loop", "Self Repair", "Static Discharge", "Storm", "Biased Cognition", "Buffer", "Creative AI", "Echo Form", "Electrodynamics", "Machine Learning", ]
 WATCHER_CARDS = ["Strike", "Defend", "Eruption", "Vigilance", "Bowling Bash", "Consecrate", "Crush Joints", "Cut Through Fate", "Empty Fist", "Flurry of Blows", "Flying Sleeves", "Follow Up", "Just Lucky", "Sash Whip", "Carve Reality", "Conclude", "Fear No Evil", "Reach Heaven", "Sands of Time", "Signature Move", "Talk to the Hand", "Tantrum", "Wallop", "Weave", "Wheel Kick", "Windmill Strike", "Brilliance", "Lesson Learned", "Ragnarok", "Crescendo", "Empty Body", "Evaluate", "Halt", "Pressure Points", "Prostrate", "Protect", "Third Eye", "Tranquility", "Collect", "Deceive Reality", "Empty Mind", "Foreign Influence", "Indignation", "Inner Peace", "Meditate", "Perseverance", "Pray", "Sanctity", "Simmering Fury", "Swivel", "Wave of the Hand", "Worship", "Wreath of Flame", "Alpha", "Blasphemy", "Conjure Blade", "Deus Ex Machina", "Judgment", "Omniscience", "Scrawl", "Spirit Shield", "Vault", "Wish", "Battle Hymn", "Fasting", "Foresight", "Like Water", "Mental Fortress", "Nirvana", "Rushdown", "Study", "Deva Form", "Devotion", "Establishment", "Master Reality", ]
 COLORLESS_CARDS = ["Dramatic Entrance", "Flash of Steel", "Mind Blast", "Swift Strike", "HandOfGreed", "Bite", "Expunger", "Ritual Dagger", "Shiv", "Smite", "Through Violence", "Bandage Up", "Blind", "Dark Shackles", "Deep Breath", "Discovery", "Enlightenment", "Finesse", "Forethought", "Good Instincts", "Impatience", "Jack Of All Trades", "Madness", "Panacea", "PanicButton", "Purity", "Trip", "Apotheosis", "Chrysalis", "Master of Strategy", "Metamorphosis", "Secret Technique", "Secret Weapon", "The Bomb", "Thinking Ahead", "Transmutation", "Violence", "Apparition", "Beta", "Insight", "J.A.X.", "Miracle", "Safety", "Magnetism", "Mayhem", "Panache", "Sadistic Nature", "Omega", ]
 CURSE_CARDS = ["Ascender's Bane", "Clumsy", "Curse of the Bell", "Decay", "Doubt", "Injury", "Necronomicurse", "Normality", "Pain", "Parasite", "Pride", "Regret", "Shame", "Writhe"]
 MISC_COLLECTIBLE_CARDS = ["Ghostly"]
-OLDER_CARDS = ["Conserve Battery"]
+OLDER_CARDS = ["Conserve Battery", "Underhanded Strike", "Path To Victory", "Clear The Mind", "Steam", "Redo", "Lock On", "Judgement", "Gash"]
 
 ALL_CARDS = IRONCLAD_CARDS + SILENT_CARDS + DEFECT_CARDS + WATCHER_CARDS + COLORLESS_CARDS + CURSE_CARDS + MISC_COLLECTIBLE_CARDS + OLDER_CARDS
+
+class UnknownCard(Exception):
+    def __init__(self, card, *args: object) -> None:
+        super().__init__(*args)
+        self.card = card
 
 def is_a_card(card : str):
     name = card_to_name(card)
@@ -124,7 +129,8 @@ class FloorDelta:
         self.hp_delta = hp_delta
 
         for card in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped:
-            assert card_to_name(card) in ALL_CARDS_FORMATTED
+            if card_to_name(card) not in ALL_CARDS_FORMATTED:
+                raise UnknownCard(card)
 
         self.cards_removed_or_transformed = []
 
@@ -276,7 +282,7 @@ class History:
             else:
                 floor_delta.unresolved_transformed_cards.append(card)
 
-        if (self.last_resolved_floor_delta_idx == floor_delta.floor) and floor_delta.is_unresolved():
+        if (self.last_resolved_floor_delta_idx == floor_delta.floor) and (not floor_delta.is_unresolved()):
             self.last_resolved_floor_delta_idx += 1
 
     def bakward_forward(self, delta_to_master : FloorDelta = None):
@@ -358,7 +364,7 @@ class History:
 
         return delta_to_master
 
-def rebuild_deck_from_vanilla_run(data : dict, draft_dataset : list):
+def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
     default_ret = False, FloorDelta(floor=0)
 
     if not data["is_ascension_mode"]: return default_ret
@@ -373,11 +379,9 @@ def rebuild_deck_from_vanilla_run(data : dict, draft_dataset : list):
 
     history = History(initial_floor_state)
 
-    ### TODO: Neow
-
-    floor = 0
+    floor = -1
     act = 1
-    for node in data["path_per_floor"]:
+    for node in ["NEOW"] + data["path_per_floor"]:
         floor += 1
         floor_delta_dict = {}
 
@@ -389,11 +393,15 @@ def rebuild_deck_from_vanilla_run(data : dict, draft_dataset : list):
                 not_picked = card_choice["not_picked"] if isinstance(card_choice["not_picked"], list) else [card_choice["not_picked"]]
                 floor_delta_dict["cards_skipped"] = floor_delta_dict.get("cards_skipped", []) + not_picked
         
-        if (node == "M") or (node == "E") or (node == "B") or (node == "NEOW"):
+        if (node == "M") or (node == "E") or (node == "B"):
             if node == "B":
                 if act <= 2:
-                    floor_delta_dict["relics_added"] = [data["boss_relics"][act-1]["picked"]]
+                    if "picked" in data["boss_relics"][act-1]:
+                        floor_delta_dict["relics_added"] = [data["boss_relics"][act-1]["picked"]]
                 act += 1
+        elif node == "NEOW":
+            if data.get("neow_bonus", "") == "BOSS_RELIC":
+                floor_delta_dict["relics_added"] = [data["relics"][0]]
         elif node == "?":
             for event_choice in data["event_choices"]:
                 if event_choice["floor"] == floor:
@@ -409,7 +417,7 @@ def rebuild_deck_from_vanilla_run(data : dict, draft_dataset : list):
                     if "cards_transformed" in event_choice:
                         for card in event_choice["cards_transformed"]:
                             floor_delta_dict["cards_transformed"] = floor_delta_dict.get("cards_transformed", []) + [card]
-                    if event_choice["event_name"] == "Vampires": # NOTE: vampires
+                    if event_choice["event_name"] == "Vampires": # NOTE: became a vampire
                         if "Bite" in floor_delta_dict.get("cards_added", []):
                             floor_delta_dict["cards_removed"] = [card for card in history.floor_states[-1].cards if card == 'strike_r']
         elif node == "R":
@@ -451,6 +459,14 @@ def rebuild_deck_from_vanilla_run(data : dict, draft_dataset : list):
     master_deck = data["master_deck"]
     delta_to_master = history.wrap_up(master_deck)
 
+    for floor_state, floor_delta in zip(history.floor_states, history.floor_deltas):
+        if len(floor_delta.cards_skipped):
+            data_row = {
+                "deck": floor_state.cards,
+                "cards_picked": floor_delta.cards_added,
+                "cards_skipped": floor_delta.cards_skipped,
+            }
+            run_rows.append(data_row)
 
     return (len(delta_to_master.cards_added) == 0) and (len(delta_to_master.cards_removed_or_transformed) == 0) and (len(delta_to_master.cards_upgraded) == 0), delta_to_master
 
@@ -616,18 +632,27 @@ def main2():
     for run_idx, data in enumerate(datas):
         assert set(data.keys()) == {'event'}
         data = data["event"]
-        success, delta_to_master = rebuild_deck_from_vanilla_run(data, draft_dataset)
+        run_rows = []
+        try:
+            success, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+        except UnknownCard as e:
+            print(f"{run_idx}: Unknown card {e.card}")
+            continue
+        draft_dataset += run_rows
         diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
         total_diff += diff
         if diff or success:
             computed_run += 1
             # json.dump(data, open("./example_vanilla.run", "w"), indent=4)
-        if computed_run >= 50:
-            break
+            if diff >= 1:
+                print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
     print(f"Diff score over {computed_run} runs = {total_diff}")
+
+    filepath = "./november_dataset.data"
+    json.dump(draft_dataset, open(filepath, "w"))
+    print(f"Dumped dataset of {len(draft_dataset)} samples into {filepath}")
 
 if __name__ == "__main__":
     # main()
     main2()
-
 
