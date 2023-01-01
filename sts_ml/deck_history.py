@@ -77,14 +77,20 @@ def remove_card(deck : List[str], card : str):
             assert is_a_card(card), card
             # assert False, f"{card} not in {deck}" # NOTE: curses obtained with Cursed Key are not recorded
 
-def card_to_upgrade(card : str):
+def card_to_upgrade(card : str, delta_upgrades : int = 1):
     if "+" in card:
         name, n_upgrades = card.split("+")
         n_upgrades = int(n_upgrades)
     else:
         name = card
         n_upgrades = 0
-    card = f"{name}+{n_upgrades+1}"
+    n_upgrades += delta_upgrades
+    if n_upgrades > 0:
+        card = f"{name}+{n_upgrades}"
+    elif n_upgrades == 0:
+        card = f"{name}"
+    else:
+        assert False, n_upgrades
     return card
 
 def upgrade_card(deck : List[str], card : str):
@@ -269,12 +275,17 @@ class History:
         unresolved_upgraded_cards = floor_delta.unresolved_upgraded_cards
         floor_delta.unresolved_upgraded_cards = []
         for card in floor_delta.cards_upgraded + unresolved_upgraded_cards:
+            upgraded_card = card_to_upgrade(card)
             if card in floor_state.cards:
                 idx = floor_state.cards.index(card)
                 floor_state.cards.pop(idx)
-                floor_state.cards.insert(idx, card_to_upgrade(card))
+                floor_state.cards.insert(idx, upgraded_card)
             else:
                 floor_delta.unresolved_upgraded_cards.append(card)
+                if correcting_floor_delta is not None:
+                    if upgraded_card in correcting_floor_delta.cards_added:
+                        correcting_floor_delta.cards_added.remove(upgraded_card)
+                        correcting_floor_delta.cards_added.append(card)
         
         # transform cards, retry to assign unresolved
         unresolved_transformed_cards = floor_delta.unresolved_transformed_cards
