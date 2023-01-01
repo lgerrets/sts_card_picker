@@ -4,6 +4,7 @@ Baalor400/
 **/__pycache__
 **/*.ckpt
 **/*.png
+trainings/
 SlayTheData.7z
 SlayTheData/
 november*

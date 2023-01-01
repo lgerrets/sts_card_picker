@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 from sts_ml.deck_history import ALL_CARDS_FORMATTED, card_to_name, card_to_n_upgrades
 
 ALL_TOKENS = ["PAD_TOKEN"] + ALL_CARDS_FORMATTED
-TRAINING_DIR = "./trainings"
+TRAINING_DIR = "trainings"
+PARAMS_FILENAME = "params.json"
 
 def token_to_index(token : str):
     name = card_to_name(token)
@@ -43,19 +44,19 @@ def pad_sample(sample : dict, pad_left : int):
     return sample
 
 class Model(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, params) -> None:
         super().__init__()
         
-        self.dim = dim = 256
+        self.dim = dim = params["model"]["dim"]
         self.embedding = nn.Embedding(len(ALL_TOKENS), dim)
-        blocks = [Block(dim, 2*dim, 4) for _ in range(4)]
+        blocks = [Block(dim, params["model"]["ffdim"], 4) for _ in range(params["model"]["blocks"])]
         self.blocks = nn.Sequential(*blocks)
         self.projection = nn.Linear(dim, 2)
 
         self.device = device = "cuda" if torch.cuda.is_available() else "cpu"
         self.to(device)
 
-        self.opt = torch.optim.Adam(self.parameters(), lr=1e-4)
+        self.opt = torch.optim.Adam(self.parameters(), lr=params["train"]["lr"])
 
     def forward(self, idxes : torch.tensor, deck_sizes : np.ndarray, n_upgrades : torch.tensor):
         feat = self.embedding(idxes)
@@ -83,6 +84,9 @@ class Model(nn.Module):
             pred_modes = torch.concatenate([modes[sample_idx:sample_idx+1, deck_n:deck_n+picked_n, 1], modes[sample_idx:sample_idx+1, deck_n+picked_n:deck_n+picked_n+skipped_n, 0]], axis=1)
             l_inf += 1 - torch.min(pred_modes.float())
             l_1 += 1 - torch.mean(pred_modes.float())
+        cross_ent_loss /= len(samples)
+        l_inf /= len(samples)
+        l_1 /= len(samples)
         return logits, cross_ent_loss, l_inf, l_1
     
     def learn(self, dataset, batch_size):
@@ -162,33 +166,45 @@ class Block(nn.Module):
         return feat
 
 def gen_ckpt_idxes():
-    idx = 0
-    delta = 1
-    while 1:
+    idxes = np.arange(100)
+    idxes = idxes ** 3
+    for idx in idxes: 
         yield idx
+    delta = idxes[-1] - idxes[-2]
+    idx = idxes[-1]
+    while 1:
         idx += delta
-        delta += 1
+        yield idx
 
-def main(model=None):
+def main(model = None, params : dict = None):
+    assert (model is None) == (params is None)
+
     if model is None:
-        model = Model()
-        model.train()
+        from sts_ml.params import params
+        model = Model(params)
+    
+    model.train()
 
     dataset = json.load(open("./november_dataset.data", "r"))
     dataset = pad_samples(dataset)
-    train_val_split = int(0.8*len(dataset))
+    split = params["train"]["split"]
+    train_val_split = int(split * len(dataset))
     train_dataset = dataset[:train_val_split]
     val_dataset = dataset[train_val_split:]
+    print(f"Train ({train_val_split}) / validation ({len(dataset) - train_val_split}) ratio = {split}")
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    exp_dir = f"{TRAINING_DIR}/{timestamp}_november"
+    exp_dir = os.path.join(".", TRAINING_DIR, f"{timestamp}_november_blocks{params['model']['blocks']}-{params['model']['dim']}_split{params['train']['split']}")
     os.makedirs(exp_dir)
+    json.dump(params, open(os.path.join(exp_dir, PARAMS_FILENAME), "w"))
     metrics_df = pd.DataFrame()
     n_epochs = 10000
     ckpt_idxes = gen_ckpt_idxes()
     next_epock_save_idx = next(ckpt_idxes)
-    for epoch in range(n_epochs):
-        cross_ent_loss, l_inf, l_1 = model.learn(train_dataset, 256)
+    epoch = 0
+    batch_size = 256
+    while epoch < n_epochs:
+        cross_ent_loss, l_inf, l_1 = model.learn(train_dataset, batch_size)
         
         cross_ent_loss = cross_ent_loss.item()
         l_inf = l_inf.item()
@@ -200,7 +216,7 @@ def main(model=None):
         }
 
         if epoch == next_epock_save_idx:
-            logits, cross_ent_loss, l_inf, l_1 = model.predict_samples(np.random.choice(val_dataset, size=256))
+            logits, cross_ent_loss, l_inf, l_1 = model.predict_samples(np.random.choice(val_dataset, size=batch_size))
             cross_ent_loss = cross_ent_loss.item()
             l_inf = l_inf.item()
             l_1 = l_1.item()
@@ -216,9 +232,12 @@ def main(model=None):
         if epoch == next_epock_save_idx:
             next_epock_save_idx = next(ckpt_idxes)
             torch.save(model.state_dict(), f"{exp_dir}/{epoch}.ckpt")
+        
+        metrics_df.to_csv(f"{exp_dir}/metrics.csv")
+        
+        epoch += 1
 
     torch.save(model.state_dict(), f"{exp_dir}/{epoch}.ckpt")
-
     metrics_df.to_csv(f"{exp_dir}/metrics.csv")
 
     model.eval()
@@ -233,14 +252,15 @@ def main(model=None):
             idx = (idx + 1001) % len(val_dataset)
             model.predict(val_dataset[idx])
 
-def pursue_training():
-    model = Model()
-    model.train()
+def pursue_training(training_dirname):
+    training_dir = os.path.join(TRAINING_DIR, training_dirname)
+    params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
+    model = Model(params=params)
 
-    ckpt = f"{TRAINING_DIR}/"
-    model.load_state_dict(torch.load(ckpt))
+    ckpt = 561
+    model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
 
-    main(model)
+    main(model, params)
 
 if __name__ == "__main__":
     main()
