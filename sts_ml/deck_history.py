@@ -30,6 +30,9 @@ def is_a_card(card : str):
 def format_string(card_name : str):
     card_name = card_name.replace(' ', '')
     card_name = card_name.lower()
+    for color in ['r', 'g', 'b', 'p']:
+        card_name = card_name.replace(f'strike{color}', 'strike')
+        card_name = card_name.replace(f'defend{color}', 'defend')
     return card_name
 
 CURSE_CARDS_FORMATTED = [format_string(_) for _ in CURSE_CARDS]
@@ -129,7 +132,7 @@ class FloorDelta:
         self.hp_delta = hp_delta
 
         for card in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped:
-            if card_to_name(card) not in ALL_CARDS_FORMATTED:
+            if card_to_name(card) not in ALL_CARDS_FORMATTED + [DEFINITELY_SOMETHING]:
                 raise UnknownCard(card)
 
         self.cards_removed_or_transformed = []
@@ -162,7 +165,7 @@ class FloorState:
 
 class History:
     def __init__(self, initial_floor_state):
-        self.last_resolved_floor_delta_idx = 0
+        self.last_resolved_floor_delta_idx = -1
         self.floor_deltas : List[FloorDelta] = []
         self.floor_states : List[FloorState] = [initial_floor_state] # states are previous to picking/skipping rewards at that floor
     
@@ -402,6 +405,8 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
         elif node == "NEOW":
             if data.get("neow_bonus", "") == "BOSS_RELIC":
                 floor_delta_dict["relics_added"] = [data["relics"][0]]
+            elif data.get("neow_bonus", "") == "ONE_RANDOM_RARE_CARD":
+                floor_delta_dict["cards_added"] = [DEFINITELY_SOMETHING]
         elif node == "?":
             for event_choice in data["event_choices"]:
                 if event_choice["floor"] == floor:

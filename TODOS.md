@@ -1,14 +1,33 @@
 ## .run processing
 
-- Card names in .run files have no standardized format. I should format those as early as possible in pipeline.
+- Be careful of modded .run
 - For now we drop out samples from the dataset that contain unknown cards
-- I'm looking into vanilla (not Run History Plus) .run files. There is even more work to do with them, but I have some idea of how to do it, with some forward/backward logic.
+- Finetuning the processing of vanilla .run
+- Have richer information on undetermined card changes
+- Add relics and some more state to the input of the model
 
-## Model training
+## Model
 
 - I'm padding the entire dataset once to minimize out of distribution but this may be bad for perf and generalize poorly?
-- Support configurable stateful experiment parameters
-- Validation dataset
+- Model could predict richer labels, eg the damage taken as SlayTheSpireFightPredictor
+
+## References
+
+- https://github.com/alexdriedger/SlayTheSpireFightPredictor
+  - nice and clean code
+  - seems to well manage certain constraints for the backward pass (eg the upgraded card was a skill, so look for an upgraded skill in the master deck)
+  - their model does an average of the embeddings, but doing attention as I'm doing should be a great low hanging fruit improvement?
+  - I would be almost tempted to fork their repo given how clean and polished it is, but I'm happy with my backward/forward phylosophy for processing .run + pytorch over tf and sklearn
+
+### Datas
+
+Listing potentially interesting data ressources
+
+- official 77 millions .run dataset 
+- official 'november' dataset (part of the 77M dataset)
+- Baalor 400 wins
+- Jorbs
+- https://spirelogs.com
 
 ## Examples
 
