@@ -5,6 +5,10 @@
 - Finetuning the processing of vanilla .run
 - Have richer information on undetermined card changes
 - Add relics and some more state to the input of the model
+- In second part of bakward_forward, resolving later floors first does not make sense because the accumulated delta is the total delta!!!
+- Deal with Cursed key?
+- Deal with parasite from wriggling horror?
+- Tinyhouse: skipped cards are not logged, the added card is put together with the rare pick
 
 ## Model
 

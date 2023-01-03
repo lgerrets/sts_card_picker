@@ -124,6 +124,10 @@ class FloorDelta:
         relics_removed : List[str] = DUMMY_LIST,
         gold_delta : int = 0,
         hp_delta : int = 0,
+        event_name : str = None,
+        player_choice : str = None,
+        node : str = "",
+        chest_opened : bool = False,
     ):
         self.floor = floor
         self.cards_added = [format_string(_) for _ in cards_added]
@@ -132,10 +136,13 @@ class FloorDelta:
         self.cards_transformed = [format_string(_) for _ in cards_transformed]
         self.cards_skipped = [format_string(_) for _ in cards_skipped]
         self.relics_added = [format_string(_) for _ in relics_added]
-        self.relics_triggered = [] # relics lie in added and go here once their effect is triggered, if they have an effect that triggers changing other attributes of this delta when obtained (eg whetstone, pandora's box, not omamori)
         self.relics_removed = [format_string(_) for _ in relics_removed]
         self.gold_delta = gold_delta
         self.hp_delta = hp_delta
+        self.event_name = event_name
+        self.player_choice = player_choice
+        self.node = node
+        self.chest_opened = chest_opened
 
         for card in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped:
             if card_to_name(card) not in ALL_CARDS_FORMATTED + [DEFINITELY_SOMETHING]:
@@ -147,10 +154,11 @@ class FloorDelta:
         self.unresolved_upgraded_cards = []
         self.unresolved_transformed_cards = []
         self.unresolved_removed_relics = []
+        self.triggered = False
     
     def is_unresolved(self):
-        ret = len(self.unresolved_removed_cards) + len(self.unresolved_upgraded_cards) + len(self.unresolved_transformed_cards) + len(self.unresolved_removed_relics) == 0
-        ret |= DEFINITELY_SOMETHING in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed
+        ret = (len(self.unresolved_removed_cards) + len(self.unresolved_upgraded_cards) + len(self.unresolved_transformed_cards) + len(self.unresolved_removed_relics)) > 0
+        ret |= DEFINITELY_SOMETHING in (self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed)
         return ret
 
 class FloorState:
@@ -168,6 +176,18 @@ class FloorState:
         self.gold = gold
         self.hp = hp
         self.modifiers = {}
+
+def dispatch_found_cards(deck : list, cards_to_find : list, not_found_cards : list):
+    found_cards = []
+    new_not_found_cards = []
+    deck = copy.deepcopy(deck)
+    for card in cards_to_find + not_found_cards:
+        if card in deck:
+            found_cards.append(card)
+            deck.remove(card)
+        else:
+            new_not_found_cards.append(card)
+    return found_cards, new_not_found_cards
 
 class History:
     def __init__(self, initial_floor_state):
@@ -198,62 +218,71 @@ class History:
                 idx = floor_delta.cards_added.index(DEFINITELY_SOMETHING)
                 floor_delta.cards_added.pop(idx)
                 floor_delta.cards_added.insert(idx, correcting_floor_delta.cards_added.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.cards_removed) and len(correcting_floor_delta.cards_removed):
-                idx = floor_delta.cards_removed.index(DEFINITELY_SOMETHING)
-                floor_delta.cards_removed.pop(idx)
+            while (DEFINITELY_SOMETHING in floor_delta.unresolved_removed_cards) and len(correcting_floor_delta.cards_removed):
+                idx = floor_delta.unresolved_removed_cards.index(DEFINITELY_SOMETHING)
+                floor_delta.unresolved_removed_cards.pop(idx)
                 floor_delta.cards_removed.insert(idx, correcting_floor_delta.cards_removed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.cards_transformed) and len(correcting_floor_delta.cards_transformed):
-                idx = floor_delta.cards_transformed.index(DEFINITELY_SOMETHING)
-                floor_delta.cards_transformed.pop(idx)
+            while (DEFINITELY_SOMETHING in floor_delta.unresolved_transformed_cards) and len(correcting_floor_delta.cards_transformed):
+                idx = floor_delta.unresolved_transformed_cards.index(DEFINITELY_SOMETHING)
+                floor_delta.unresolved_transformed_cards.pop(idx)
                 floor_delta.cards_transformed.insert(idx, correcting_floor_delta.cards_transformed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.cards_removed) and len(correcting_floor_delta.cards_removed_or_transformed):
-                idx = floor_delta.cards_removed.index(DEFINITELY_SOMETHING)
-                floor_delta.cards_removed.pop(idx)
+            while (DEFINITELY_SOMETHING in floor_delta.unresolved_removed_cards) and len(correcting_floor_delta.cards_removed_or_transformed):
+                idx = floor_delta.unresolved_removed_cards.index(DEFINITELY_SOMETHING)
+                floor_delta.unresolved_removed_cards.pop(idx)
                 floor_delta.cards_removed.insert(idx, correcting_floor_delta.cards_removed_or_transformed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.cards_transformed) and len(correcting_floor_delta.cards_removed_or_transformed):
-                idx = floor_delta.cards_transformed.index(DEFINITELY_SOMETHING)
-                floor_delta.cards_transformed.pop(idx)
+            while (DEFINITELY_SOMETHING in floor_delta.unresolved_transformed_cards) and len(correcting_floor_delta.cards_removed_or_transformed):
+                idx = floor_delta.unresolved_transformed_cards.index(DEFINITELY_SOMETHING)
+                floor_delta.unresolved_transformed_cards.pop(idx)
                 floor_delta.cards_transformed.insert(idx, correcting_floor_delta.cards_removed_or_transformed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.cards_upgraded) and len(correcting_floor_delta.cards_upgraded):
-                idx = floor_delta.cards_upgraded.index(DEFINITELY_SOMETHING)
-                floor_delta.cards_upgraded.pop(idx)
+            while (DEFINITELY_SOMETHING in floor_delta.unresolved_upgraded_cards) and len(correcting_floor_delta.cards_upgraded):
+                idx = floor_delta.unresolved_upgraded_cards.index(DEFINITELY_SOMETHING)
+                floor_delta.unresolved_upgraded_cards.pop(idx)
                 floor_delta.cards_upgraded.insert(idx, correcting_floor_delta.cards_upgraded.pop(-1))
 
-        # here we do some processing specific to relics ; each addition here is checked against data that it actually helps reduce the number of misses on average
+        # here we do some processing specific to relics
 
-        if "whetstone" in floor_delta.relics_added: # NOTE: confirmed that it reduces errors
-            floor_delta.cards_upgraded += [DEFINITELY_SOMETHING] * 2
-            floor_delta.relics_added.remove("whetstone")
-            floor_delta.relics_triggered.append("whetstone")
+        # for some relics, we have to do the update only once, because we update possibly non-empty list attributes ; typically, we can be sure that boss relics 
+        if not floor_delta.triggered:
+            if "whetstone" in floor_delta.relics_added:
+                floor_delta.cards_upgraded += [DEFINITELY_SOMETHING] * 2
 
-        if "warpaint" in floor_delta.relics_added: # NOTE: confirmed that it reduces errors
-            floor_delta.cards_upgraded += [DEFINITELY_SOMETHING] * 2
-            floor_delta.relics_added.remove("warpaint")
-            floor_delta.relics_triggered.append("warpaint")
+            if "warpaint" in floor_delta.relics_added:
+                floor_delta.cards_upgraded += [DEFINITELY_SOMETHING] * 2
+            
+            if "pandora'sbox" in floor_delta.relics_added:
+                transformed = [card for card in floor_state.cards if card in {'strike_r', 'defend_r'}]
+                pandoras_n_transforms = len(transformed)
+                floor_delta.cards_transformed = transformed
+                floor_delta.cards_added = [DEFINITELY_SOMETHING for i in range(pandoras_n_transforms)]
 
-        if "pandora'sbox" in floor_delta.relics_added: # NOTE: confirmed that it reduces errors
-            transformed = [card for card in floor_state.cards if card in {'strike_r', 'defend_r'}]
-            pandoras_n_transforms = len(transformed)
-            floor_delta.cards_transformed = transformed
-            floor_delta.cards_added = [DEFINITELY_SOMETHING for i in range(pandoras_n_transforms)]
-            floor_delta.relics_added.remove("pandora'sbox")
-            floor_delta.relics_triggered.append("pandora'sbox")
+            if "astrolabe" in floor_delta.relics_added:
+                n_transforms = 3
+                floor_delta.cards_transformed = [DEFINITELY_SOMETHING for i in range(n_transforms)]
+                floor_delta.cards_added = [DEFINITELY_SOMETHING for i in range(n_transforms)]
 
-        if "astrolabe" in floor_delta.relics_added: # NOTE: confirmed that it reduces errors
-            n_transforms = 3
-            floor_delta.cards_transformed += [DEFINITELY_SOMETHING for i in range(n_transforms)]
-            floor_delta.cards_added += [DEFINITELY_SOMETHING for i in range(n_transforms)]
-            floor_delta.relics_added.remove("astrolabe")
-            floor_delta.relics_triggered.append("astrolabe")
+            if "tinyhouse" in floor_delta.relics_added:
+                floor_delta.cards_added += [DEFINITELY_SOMETHING]
+                floor_delta.cards_upgraded += [DEFINITELY_SOMETHING]
 
-        if "tinyhouse" in floor_delta.relics_added: # NOTE: confirmed that it reduces errors
-            floor_delta.cards_added += [DEFINITELY_SOMETHING]
-            floor_delta.cards_upgraded += [DEFINITELY_SOMETHING]
-            floor_delta.relics_added.remove("tinyhouse")
-            floor_delta.relics_triggered.append("tinyhouse")
+            if "omamori" in floor_delta.relics_added:
+                floor_state.modifiers["omamori_counter"] = 2
 
-        if "omamori" in floor_delta.relics_added: # NOTE: confirmed that it reduces errors
-            floor_state.modifiers["omamori_counter"] = 2
+            if ("cursedkey" in floor_state.relics) and floor_delta.chest_opened:
+                floor_delta.cards_added += [DEFINITELY_SOMETHING]
+            
+        if floor_delta.event_name is not None:
+            if floor_delta.event_name == "Vampires":
+                if "bite" in floor_delta.cards_added: # also remove all strikes
+                    floor_delta.cards_removed = [card for card in self.floor_states[floor_delta.floor].cards if card.startswith('strike')]
+
+            if (floor_delta.event_name == "Duplicator") and (floor_delta.player_choice == "Copied"):
+                deck = self.floor_states[floor_delta.floor].cards
+                duplicated_card_name = floor_delta.cards_added[0]
+                if duplicated_card_name not in deck: # this event does not log the upgrade number of the copied card ; so we retrive a card that has the same base name in the deck ; NOTE this may not be accurate due to Searing Blow
+                    for card in deck:
+                        if card_to_name(card) == duplicated_card_name:
+                            floor_delta.cards_added = [card]
+                            break
 
         # add cards
         for card in floor_delta.cards_added:
@@ -261,43 +290,43 @@ class History:
                 floor_state.modifiers["omamori_counter"] -= 1
             else:
                 floor_state.cards.append(card)
-        
+
         # remove cards, retry to assign unresolved
-        unresolved_removed_cards = floor_delta.unresolved_removed_cards
-        floor_delta.unresolved_removed_cards = []
-        for card in floor_delta.cards_removed + unresolved_removed_cards:
-            if card in floor_state.cards:
-                floor_state.cards.remove(card)
-            else:
-                floor_delta.unresolved_removed_cards.append(card)
+        found_cards, new_not_found_cards = dispatch_found_cards(floor_state.cards, floor_delta.cards_removed, floor_delta.unresolved_removed_cards)
+        floor_delta.cards_removed = found_cards
+        floor_delta.unresolved_removed_cards = new_not_found_cards
+        for card in found_cards:
+            floor_state.cards.remove(card)
         
         # upgrade cards, retry to assign unresolved
-        unresolved_upgraded_cards = floor_delta.unresolved_upgraded_cards
-        floor_delta.unresolved_upgraded_cards = []
-        for card in floor_delta.cards_upgraded + unresolved_upgraded_cards:
+        found_cards, new_not_found_cards = dispatch_found_cards(floor_state.cards, floor_delta.cards_upgraded, floor_delta.unresolved_upgraded_cards)
+        floor_delta.cards_upgraded = found_cards
+        floor_delta.unresolved_upgraded_cards = new_not_found_cards
+        for card in found_cards:
             upgraded_card = card_to_upgrade(card)
-            if card in floor_state.cards:
-                idx = floor_state.cards.index(card)
-                floor_state.cards.pop(idx)
-                floor_state.cards.insert(idx, upgraded_card)
-            else:
-                floor_delta.unresolved_upgraded_cards.append(card)
-                if correcting_floor_delta is not None:
-                    if upgraded_card in correcting_floor_delta.cards_added:
-                        correcting_floor_delta.cards_added.remove(upgraded_card)
-                        correcting_floor_delta.cards_added.append(card)
+            idx = floor_state.cards.index(card)
+            floor_state.cards.pop(idx)
+            floor_state.cards.insert(idx, upgraded_card)
+        if correcting_floor_delta is not None:
+            for card in new_not_found_cards:
+                upgraded_card = card_to_upgrade(card)
+                if upgraded_card in correcting_floor_delta.cards_added:
+                    correcting_floor_delta.cards_added.remove(upgraded_card)
+                    correcting_floor_delta.cards_added.append(card)
         
         # transform cards, retry to assign unresolved
-        unresolved_transformed_cards = floor_delta.unresolved_transformed_cards
-        floor_delta.unresolved_transformed_cards = []
-        for card in floor_delta.cards_transformed + unresolved_transformed_cards:
-            if card in floor_state.cards:
-                floor_state.cards.remove(card)
-            else:
-                floor_delta.unresolved_transformed_cards.append(card)
+        found_cards, new_not_found_cards = dispatch_found_cards(floor_state.cards, floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards)
+        floor_delta.cards_transformed = found_cards
+        floor_delta.unresolved_transformed_cards = new_not_found_cards
+        for card in found_cards:
+            floor_state.cards.remove(card)
+        
+        # add relics
+        floor_state.relics += floor_delta.relics_added
 
-        if (self.last_resolved_floor_delta_idx == floor_delta.floor) and (not floor_delta.is_unresolved()):
+        if (self.last_resolved_floor_delta_idx == floor_delta.floor - 1) and (not floor_delta.is_unresolved()):
             self.last_resolved_floor_delta_idx += 1
+        floor_delta.triggered = True
 
     def bakward_forward(self, delta_to_master : FloorDelta = None):
         if delta_to_master is None:
@@ -378,13 +407,18 @@ class History:
 
         return delta_to_master
 
+def filter_run(data : dict):
+    if not data["is_ascension_mode"]: return False
+    if data["character_chosen"] != "IRONCLAD": return False
+    if data["ascension_level"] < 10: return False
+    if not data["victory"]: return False
+    return True
+
 def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
     default_ret = False, FloorDelta(floor=0)
-
-    if not data["is_ascension_mode"]: return default_ret
-    if data["character_chosen"] != "IRONCLAD": return default_ret
-    if data["ascension_level"] < 10: return default_ret
-    if not data["victory"]: return default_ret
+    
+    if not filter_run(data):
+        return default_ret
 
     initial_floor_state = FloorState(
         floor = 0,
@@ -399,6 +433,8 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
         floor += 1
         floor_delta_dict = {}
 
+        keys_added = [] # TODO red blue green keys
+
         for card_choice in data["card_choices"]:
             if card_choice["floor"] == floor:
                 got_at_least_one_reward = True
@@ -406,7 +442,14 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                     floor_delta_dict["cards_added"] = floor_delta_dict.get("cards_added", []) + [card_choice["picked"]]
                 not_picked = card_choice["not_picked"] if isinstance(card_choice["not_picked"], list) else [card_choice["not_picked"]]
                 floor_delta_dict["cards_skipped"] = floor_delta_dict.get("cards_skipped", []) + not_picked
-        
+
+        for relics_obtained_data in data["relics_obtained"]:
+            if relics_obtained_data["floor"] == floor:
+                relic = format_string(relics_obtained_data["key"])
+                floor_delta_dict["relics_added"] = floor_delta_dict.get("relics_added", []) + [relic]
+                if relic == "necronomicon": # NOTE: necronomicon
+                    floor_delta_dict["cards_added"] = floor_delta_dict.get("cards_added", []) + ["necronomicurse"]
+
         if (node == "M") or (node == "E") or (node == "B"):
             if node == "B":
                 if act <= 2:
@@ -418,6 +461,8 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                 floor_delta_dict["relics_added"] = [data["relics"][0]]
             elif data.get("neow_bonus", "") == "ONE_RANDOM_RARE_CARD":
                 floor_delta_dict["cards_added"] = [DEFINITELY_SOMETHING]
+            elif data.get("neow_bonus", "") == "REMOVE_TWO":
+                floor_delta_dict["cards_removed"] = [DEFINITELY_SOMETHING]*2
         elif node == "?":
             for event_choice in data["event_choices"]:
                 if event_choice["floor"] == floor:
@@ -433,9 +478,9 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                     if "cards_transformed" in event_choice:
                         for card in event_choice["cards_transformed"]:
                             floor_delta_dict["cards_transformed"] = floor_delta_dict.get("cards_transformed", []) + [card]
-                    if event_choice["event_name"] == "Vampires": # NOTE: became a vampire
-                        if "Bite" in floor_delta_dict.get("cards_added", []):
-                            floor_delta_dict["cards_removed"] = [card for card in history.floor_states[-1].cards if card == 'strike_r']
+                    floor_delta_dict["event_name"] = event_choice["event_name"]
+                    floor_delta_dict["player_choice"] = event_choice["player_choice"]
+                    break
         elif node == "R":
             for campfire_choice in data["campfire_choices"]:
                 if campfire_choice["floor"] == floor:
@@ -445,7 +490,8 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                     elif campfire_choice["key"] == "PURGE":
                         floor_delta_dict["cards_removed"] = floor_delta_dict.get("cards_removed", []) + [campfire_choice["data"]]
         elif node == "T":
-            pass
+            if len(floor_delta_dict.get("relics_added", [])) or len(keys_added):
+                floor_delta_dict["chest_opened"] = True
         elif node == "$":
             for purged_card, purged_floor in zip(data["items_purged"], data["items_purged_floors"]):
                 if purged_floor == floor:
@@ -461,14 +507,7 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
         else:
             assert False, node
         
-        for relics_obtained_data in data["relics_obtained"]:
-            if relics_obtained_data["floor"] == floor:
-                relic = format_string(relics_obtained_data["key"])
-                floor_delta_dict["relics_added"] = floor_delta_dict.get("relics_added", []) + [relic]
-                if relic == "necronomicon": # NOTE: necronomicon
-                    floor_delta_dict["cards_added"] = floor_delta_dict.get("cards_added", []) + ["necronomicurse"]
-
-        floor_delta = FloorDelta(floor=floor, **floor_delta_dict)
+        floor_delta = FloorDelta(floor=floor, node=node, **floor_delta_dict)
         
         history.add(floor_delta)
 
@@ -641,8 +680,14 @@ def main():
 def main2():
     draft_dataset = []
     # json_path = "./2019-05-31-00-53#1028.json"
-    json_path = "./november/november.json"
+    # json_path = "./november/november.json"
+    # json_path = "./november/50000.json"
+    # json_path = "./november/1000.json"
+    json_path = "./november/50000_win_a20_ic.json"
     datas = json.load(open(json_path, "r"))
+
+    datas = [data for data in datas if filter_run(data["event"])]
+
     total_diff = 0
     computed_run = 0
     for run_idx, data in enumerate(datas):
@@ -659,7 +704,7 @@ def main2():
         total_diff += diff
         if diff or success:
             computed_run += 1
-            # json.dump(data, open("./example_vanilla.run", "w"), indent=4)
+            json.dump(data, open("./example_vanilla.run", "w"), indent=4)
             if diff >= 1:
                 print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
     print(f"Diff score over {computed_run} runs = {total_diff}")
