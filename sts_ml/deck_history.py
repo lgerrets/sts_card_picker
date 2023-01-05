@@ -292,6 +292,9 @@ class History:
             if ("callingbell" in floor_delta.relics_added):
                 floor_delta.cards_added += ["curseofthebell"]
             
+            if ("emptycage" in floor_delta.relics_added):
+                floor_delta.cards_removed += [DEFINITELY_SOMETHING]*2
+            
         if floor_delta.event_name is not None:
             if floor_delta.event_name == "Vampires":
                 if "bite" in floor_delta.cards_added: # also remove all strikes
@@ -485,8 +488,15 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                 floor_delta_dict["relics_added"] = [data["relics"][0]]
             elif data.get("neow_bonus", "") == "ONE_RANDOM_RARE_CARD":
                 floor_delta_dict["cards_added"] = [DEFINITELY_SOMETHING]
+            elif data.get("neow_bonus", "") == "REMOVE_CARD":
+                floor_delta_dict["cards_removed"] = [DEFINITELY_SOMETHING]
             elif data.get("neow_bonus", "") == "REMOVE_TWO":
                 floor_delta_dict["cards_removed"] = [DEFINITELY_SOMETHING]*2
+            elif data.get("neow_bonus", "") == "TRANSFORM_CARD":
+                floor_delta_dict["cards_added"] = [DEFINITELY_SOMETHING]
+                floor_delta_dict["cards_transformed"] = [DEFINITELY_SOMETHING]
+            elif data.get("neow_bonus", "") == "ONE_RARE_RELIC":
+                floor_delta_dict["relics_added"] = [data["relics"][1]]
         elif node == "?":
             for event_choice in data["event_choices"]:
                 if event_choice["floor"] == floor:
@@ -564,6 +574,8 @@ def main():
     total_diff = 0
     computed_run = 0
     for run_idx, data in enumerate(datas):
+        # if run_idx < 245:
+        #     continue
         assert set(data.keys()) == {'event'}
         data = data["event"]
         run_rows = []
@@ -572,9 +584,10 @@ def main():
         except UnknownCard as e:
             print(f"{run_idx}: Unknown card {e.card}")
             continue
-        draft_dataset += run_rows
         diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
         total_diff += diff
+        if diff < 3:
+            draft_dataset += run_rows
         if diff or success:
             json.dump(data, open("./example_vanilla.run", "w"), indent=4)
             if diff >= 1:
