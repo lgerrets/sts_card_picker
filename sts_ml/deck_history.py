@@ -160,6 +160,11 @@ class FloorDelta:
         ret = (len(self.unresolved_removed_cards) + len(self.unresolved_upgraded_cards) + len(self.unresolved_transformed_cards) + len(self.unresolved_removed_relics)) > 0
         ret |= DEFINITELY_SOMETHING in (self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed)
         return ret
+    
+    def __repr__(self):
+        ret = f"{self.floor}, {self.is_unresolved()}, "
+        ret += ", ".join(self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped + self.relics_added + self.relics_removed + self.cards_removed_or_transformed + self.unresolved_removed_cards + self.unresolved_upgraded_cards + self.unresolved_transformed_cards + self.unresolved_removed_relics)
+        return ret
 
 class FloorState:
     def __init__(
@@ -182,7 +187,7 @@ def dispatch_found_cards(deck : list, cards_to_find : list, not_found_cards : li
     new_not_found_cards = []
     deck = copy.deepcopy(deck)
     for card in cards_to_find + not_found_cards:
-        if card in deck:
+        if (card in deck) and (card_to_name(card) != DEFINITELY_SOMETHING):
             found_cards.append(card)
             deck.remove(card)
         else:
