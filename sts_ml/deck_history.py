@@ -289,7 +289,7 @@ class History:
             if ("cursedkey" in floor_state.relics) and floor_delta.chest_opened:
                 floor_delta.cards_added += [DEFINITELY_SOMETHING]
             
-            if ("callingbell" in floor_state.relics) and floor_delta.chest_opened:
+            if ("callingbell" in floor_delta.relics_added):
                 floor_delta.cards_added += ["curseofthebell"]
             
         if floor_delta.event_name is not None:
@@ -555,7 +555,8 @@ def main():
     # json_path = "./november/november.json"
     # json_path = "./november/50000.json"
     # json_path = "./november/1000.json"
-    json_path = "./november/50000_win_a20_ic.json"
+    # json_path = "./november/50000_win_a20_ic.json"
+    json_path = "./november/november_win_a20_ic.json"
     datas = json.load(open(json_path, "r"))
 
     datas = [data for data in datas if filter_run(data["event"])]
