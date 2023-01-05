@@ -182,7 +182,7 @@ class FloorState:
         self.hp = hp
         self.modifiers = {}
 
-def dispatch_found_cards(deck : list, cards_to_find : list, not_found_cards : list):
+def dispatch_found_cards(deck : list, cards_to_find : list, not_found_cards : list, do_allow_wrong_upgrade : bool = False):
     found_cards = []
     new_not_found_cards = []
     deck = copy.deepcopy(deck)
@@ -192,6 +192,20 @@ def dispatch_found_cards(deck : list, cards_to_find : list, not_found_cards : li
             deck.remove(card)
         else:
             new_not_found_cards.append(card)
+    
+    if do_allow_wrong_upgrade:
+        not_found_cards = new_not_found_cards
+        new_not_found_cards = []
+        deck_card_names = [card_to_name(card) for card in deck]
+        for card in not_found_cards:
+            if card_to_name(card) in deck_card_names:
+                idx = deck_card_names.index(card_to_name(card))
+                deck_card_names.pop(idx)
+                card = deck.pop(idx)
+                found_cards.append(card)
+            else:
+                new_not_found_cards.append(card)
+
     return found_cards, new_not_found_cards
 
 class History:
@@ -275,6 +289,9 @@ class History:
             if ("cursedkey" in floor_state.relics) and floor_delta.chest_opened:
                 floor_delta.cards_added += [DEFINITELY_SOMETHING]
             
+            if ("callingbell" in floor_state.relics) and floor_delta.chest_opened:
+                floor_delta.cards_added += ["curseofthebell"]
+            
         if floor_delta.event_name is not None:
             if floor_delta.event_name == "Vampires":
                 if "bite" in floor_delta.cards_added: # also remove all strikes
@@ -296,8 +313,10 @@ class History:
             else:
                 floor_state.cards.append(card)
 
+        do_allow_wrong_upgrade = floor_delta.node == "?" # event_choices.*.cards_removed does not record the upgrade state of the removed cards
+
         # remove cards, retry to assign unresolved
-        found_cards, new_not_found_cards = dispatch_found_cards(floor_state.cards, floor_delta.cards_removed, floor_delta.unresolved_removed_cards)
+        found_cards, new_not_found_cards = dispatch_found_cards(floor_state.cards, floor_delta.cards_removed, floor_delta.unresolved_removed_cards, do_allow_wrong_upgrade=do_allow_wrong_upgrade)
         floor_delta.cards_removed = found_cards
         floor_delta.unresolved_removed_cards = new_not_found_cards
         for card in found_cards:
@@ -708,10 +727,10 @@ def main2():
         diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
         total_diff += diff
         if diff or success:
-            computed_run += 1
             json.dump(data, open("./example_vanilla.run", "w"), indent=4)
             if diff >= 1:
                 print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
+            computed_run += 1
     print(f"Diff score over {computed_run} runs = {total_diff}")
 
     filepath = "./november_dataset.data"
