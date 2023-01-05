@@ -221,7 +221,8 @@ class History:
 
         self.update_state_from_deltas(floor_state, floor_delta)
         
-        if self.last_resolved_floor_delta_idx < floor_delta.floor:
+        # for perf, only do a backward-forward pass if we have work AND new clues
+        if floor_delta.is_unresolved() and (self.last_resolved_floor_delta_idx < floor_delta.floor):
             self.bakward_forward()
     
     def update_state_from_deltas(self, floor_state : FloorState, floor_delta : FloorDelta, correcting_floor_delta : FloorDelta = None):
