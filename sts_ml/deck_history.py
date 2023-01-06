@@ -1,4 +1,6 @@
-
+from glob import glob
+import datetime
+import re
 import copy
 from tkinter import ALL
 import numpy as np
@@ -6,6 +8,8 @@ import json
 from typing import List
 import os, os.path
 from collections import defaultdict
+
+BUILD_VERSION_REGEX = re.compile('[0-9]{4}-[0-9]{2}-[0-9]{2}$')
 
 IRONCLAD_CARDS = ["Strike_R", "Defend_R", "Bash", "Anger", "Body Slam", "Clash", "Cleave", "Clothesline", "Headbutt", "Heavy Blade", "Iron Wave", "Perfected Strike", "Pommel Strike", "Sword Boomerang", "Thunderclap", "Twin Strike", "Wild Strike", "Blood for Blood", "Carnage", "Dropkick", "Hemokinesis", "Pummel", "Rampage", "Reckless Charge", "Searing Blow", "Sever Soul", "Uppercut", "Whirlwind", "Bludgeon", "Feed", "Fiend Fire", "Immolate", "Reaper", "Armaments", "Flex", "Havoc", "Shrug It Off", "True Grit", "Warcry", "Battle Trance", "Bloodletting", "Burning Pact", "Disarm", "Dual Wield", "Entrench", "Flame Barrier", "Ghostly Armor", "Infernal Blade", "Intimidate", "Power Through", "Rage", "Second Wind", "Seeing Red", "Sentinel", "Shockwave", "Spot Weakness", "Double Tap", "Exhume", "Impervious", "Limit Break", "Offering", "Combust", "Dark Embrace", "Evolve", "Feel No Pain", "Fire Breathing", "Inflame", "Metallicize", "Rupture", "Barricade", "Berserk", "Brutality", "Corruption", "Demon Form", "Juggernaut", ]
 SILENT_CARDS = ["Strike", "Defend", "Neutralize", "Survivor", "Bane", "Dagger Spray", "Dagger Throw", "Flying Knee", "Poisoned Stab", "Quick Slash", "Slice", "Sneaky Strike", "Sucker Punch", "All-Out Attack", "Backstab", "Choke", "Dash", "Endless Agony", "Eviscerate", "Finisher", "Flechettes", "Heel Hook", "Masterful Stab", "Predator", "Riddle with Holes", "Skewer", "Die Die Die", "Glass Knife", "Grand Finale", "Unload", "Acrobatics", "Backflip", "Blade Dance", "Cloak and Dagger", "Deadly Poison", "Deflect", "Dodge and Roll", "Outmaneuver", "Piercing Wail", "Prepared", "Blur", "Bouncing Flask", "Calculated Gamble", "Catalyst", "Concentrate", "Crippling Cloud", "Distraction", "Escape Plan", "Expertise", "Leg Sweep", "Reflex", "Setup", "Tactician", "Terror", "Adrenaline", "Alchemize", "Bullet Time", "Burst", "Corpse Explosion", "Doppelganger", "Malaise", "Nightmare", "Phantasmal Killer", "Storm of Steel", "Accuracy", "Caltrops", "Footwork", "Infinite Blades", "Noxious Fumes", "Well Laid Plans", "A Thousand Cuts", "After Image", "Envenom", "Tools of the Trade", "Wraith Form",]
@@ -37,6 +41,7 @@ def format_string(card_name : str):
 
 CURSE_CARDS_FORMATTED = [format_string(_) for _ in CURSE_CARDS]
 ALL_CARDS_FORMATTED = [format_string(_) for _ in ALL_CARDS]
+ALL_CARDS_FORMATTED_SET = set(ALL_CARDS_FORMATTED)
 
 DUMMY_DICT = {}
 DUMMY_LIST = []
@@ -98,18 +103,105 @@ def upgrade_card(deck : List[str], card : str):
     card = card_to_upgrade(card)
     add_card(deck, card)
 
-class Certainty:
-    (DEFINITELY, MAYBE) = range(2)
-
-class CardInformation:
-    (ATTACK, SKILL) = range(2)
-
-class UndeterminedCard:
-    def __init__(self, certainty : Certainty, card_info : CardInformation):
-        self.certainty = certainty
-        self.card_info = card_info
-
 DEFINITELY_SOMETHING = format_string("DEFINITELY_SOMETHING")
+
+
+def valid_build_number(string, character):
+    pattern = re.compile('[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+    if pattern.match(string):
+        m = re.search('(.+)-(.+)-(.+)', string)
+        year = int(m.group(1))
+        month = int(m.group(2))
+        day = int(m.group(3))
+
+        date = datetime.date(year, month, day)
+        if date >= datetime.date(2020, 1, 16):
+            return True
+        elif character in ['IRONCLAD', 'THE_SILENT', 'DEFECT'] and date >= datetime.date(2019, 1, 23):
+            return True
+
+    return False
+
+def is_bad_data(data : dict):
+    verbose = 1
+
+    # Corrupted files
+    necessary_fields = ['damage_taken', 'event_choices', 'card_choices', 'relics_obtained', 'campfire_choices',
+                        'items_purchased', 'item_purchase_floors', 'items_purged', 'items_purged_floors',
+                        'character_chosen', 'boss_relics', 'floor_reached', 'master_deck', 'relics']
+    for field in necessary_fields:
+        if field not in data:
+            if verbose:
+                print(f'File missing field: {field}')
+            return True
+
+    # Modded games
+    key = 'character_chosen'
+    if key not in data or data[key] not in ['IRONCLAD', 'THE_SILENT', 'DEFECT', 'WATCHER']:
+        if verbose:
+            print(f'Modded character: {data[key]}')
+        return True
+
+    # Watcher files since full release of watcher (v2.0) and ironclad, silent, defect since v1.0
+    # key = 'build_version'
+    # if key not in data or valid_build_number(data[key], data['character_chosen']) is False:
+    #     return True
+
+    # key = 'relics'
+    # if key not in data or set(data[key]).issubset(BASE_GAME_RELICS) is False:
+    #     return True
+
+    key = 'master_deck'
+    card_names = set([card_to_name(format_string(card)) for card in data[key]])
+    if key not in data or card_names.issubset(ALL_CARDS_FORMATTED_SET) is False:
+        if verbose:
+            print(f'Modded file. Cards: {card_names - ALL_CARDS_FORMATTED_SET}')
+        return True
+
+    # Non standard runs
+    key = 'is_trial'
+    if key not in data or data[key] is True:
+        return True
+
+    key = 'is_daily'
+    if key not in data or data[key] is True:
+        return True
+
+    key = 'daily_mods'
+    if key in data:
+        return True
+
+    key = 'chose_seed'
+    if key not in data or data[key] is True:
+        return True
+
+    # Endless mode
+    key = 'is_endless'
+    if key not in data or data[key] is True:
+        return True
+
+    key = 'circlet_count'
+    if key not in data or data[key] > 0:
+        return True
+
+    key = 'floor_reached'
+    if key not in data or data[key] > 60:
+        return True
+
+    # Really bad players or give ups
+    key = 'floor_reached'
+    if key not in data or data[key] < 4:
+        return True
+
+    key = 'score'
+    if key not in data or data[key] < 10:
+        return True
+
+    key = 'player_experience'
+    if key not in data or data[key] < 100:
+        return True
+    
+    return False
 
 class FloorDelta:
     def __init__(
@@ -446,6 +538,9 @@ def filter_run(data : dict):
     if data["character_chosen"] != "IRONCLAD": return False
     if data["ascension_level"] < 10: return False
     if not data["victory"]: return False
+
+    if is_bad_data(data): return False
+
     return True
 
 def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
@@ -569,16 +664,17 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
 def main():
     draft_dataset = []
     # json_path = "./2019-05-31-00-53#1028.json"
-    # json_path = "./november/november.json"
+    json_path = "./november/november.json"
     # json_path = "./november/50000.json"
     # json_path = "./november/1000.json"
     # json_path = "./november/50000_win_a20_ic.json"
-    json_path = "./november/november_win_a20_ic.json"
+    # json_path = "./november/november_win_a20_ic.json"
     datas = json.load(open(json_path, "r"))
 
     datas = [data for data in datas if filter_run(data["event"])]
 
-    total_diff = 0
+    total_diff_l0 = 0
+    total_diff_l1 = 0
     computed_run = 0
     for run_idx, data in enumerate(datas):
         # if run_idx < 245:
@@ -592,7 +688,7 @@ def main():
             print(f"{run_idx}: Unknown card {e.card}")
             continue
         diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
-        total_diff += diff
+        total_diff_l1 += diff
         if diff < 3:
             draft_dataset += run_rows
         if diff or success:
@@ -600,12 +696,32 @@ def main():
             if diff >= 1:
                 print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
             computed_run += 1
-    print(f"Diff score over {computed_run} runs = {total_diff}")
+            total_diff_l0 += int(diff > 0)
+    print(f"Diff score over {computed_run} runs = {total_diff_l1}, {total_diff_l0} could not be reconstructed.")
 
     filepath = "./november_dataset.data"
     json.dump(draft_dataset, open(filepath, "w"))
     print(f"Dumped dataset of {len(draft_dataset)} samples into {filepath}")
 
+def compile_datas():
+    glob_expr = "./SlayTheData/*"
+    compiled_datas = []
+    last_print_log_10 = 0
+    for filepath in glob(glob_expr):
+        try:
+            datas = json.load(open(filepath, "r"))
+        except:
+            print(f"Invalid file {filepath}")
+            continue
+        datas = [data for data in datas if filter_run(data["event"])]
+        compiled_datas += datas
+        if len(compiled_datas) > 10**last_print_log_10:
+            print(f"Compiled {len(compiled_datas)} runs")
+            last_print_log_10 += 1
+    print(f"Compiled {len(compiled_datas)} runs")
+    json.dump(compiled_datas, open("SlayTheData/SlayTheData_win_a20_ic.json", "w"))
+
 if __name__ == "__main__":
-    main()
+    # main()
+    compile_datas()
 
