@@ -341,6 +341,12 @@ class History:
                 if upgraded_card in correcting_floor_delta.cards_added:
                     correcting_floor_delta.cards_added.remove(upgraded_card)
                     correcting_floor_delta.cards_added.append(card)
+                elif card in correcting_floor_delta.cards_added:
+                    pass
+                elif card_to_name(card) == DEFINITELY_SOMETHING:
+                    pass
+                else:
+                    assert False
         
         # transform cards, retry to assign unresolved
         found_cards, new_not_found_cards = dispatch_found_cards(floor_state.cards, floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards)
@@ -360,7 +366,7 @@ class History:
         if delta_to_master is None:
             accumulated_delta = FloorDelta(floor=None)
 
-            # go backward through floors that have unresolved cards in their deltas (eg should have added a card but it was not in the deck), and collect them
+            # go backward through floors that have unresolved cards in their deltas (eg should have removed a card but it was not in the deck), and collect them
             backward_delta_idx = len(self.floor_deltas)
             while backward_delta_idx > self.last_resolved_floor_delta_idx + 1:
                 backward_delta_idx -= 1
