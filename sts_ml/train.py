@@ -1,3 +1,4 @@
+import shutil
 import os
 import pandas as pd
 import copy
@@ -8,10 +9,14 @@ import torch, torch.nn as nn
 from torch.distributions import Categorical
 from datetime import datetime
 import matplotlib.pyplot as plt
+import sys
 
-from sts_ml.deck_history import ALL_CARDS_FORMATTED, card_to_name, card_to_n_upgrades
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-ALL_TOKENS = ["PAD_TOKEN"] + ALL_CARDS_FORMATTED
+from sts_ml.deck_history import ALL_CARDS_FORMATTED, card_to_name, card_to_n_upgrades, DECISIVE_RELICS_FORMATTED
+
+CARD_TOKENS = ["PAD_TOKEN"] + list(ALL_CARDS_FORMATTED)
+ALL_TOKENS = CARD_TOKENS + list(DECISIVE_RELICS_FORMATTED)
 TRAINING_DIR = "trainings"
 PARAMS_FILENAME = "params.json"
 
@@ -48,8 +53,18 @@ class Model(nn.Module):
         super().__init__()
         
         self.dim = dim = params["model"]["dim"]
-        self.embedding = nn.Embedding(len(ALL_TOKENS), dim)
-        blocks = [Block(dim, params["model"]["ffdim"], 4) for _ in range(params["model"]["blocks"])]
+        if params["model"].get("read_relics", False):
+            tokens = ALL_TOKENS
+            raise NotImplementedError("Wip: implement the forward pass")
+        else:
+            tokens = CARD_TOKENS
+        self.embedding = nn.Embedding(len(tokens), dim)
+        if params["model"]["block_class"] == "MHALayer":
+            blocks = [MHALayer(dim, params["model"]["ffdim"], 4) for _ in range(params["model"]["blocks"])]
+        elif params["model"]["block_class"] == "Linear":
+            blocks = [nn.Linear(dim, dim) for _ in range(params["model"]["blocks"])]
+        else:
+            assert False
         self.blocks = nn.Sequential(*blocks)
         self.projection = nn.Linear(dim, 2)
 
@@ -70,6 +85,22 @@ class Model(nn.Module):
         logits = torch.softmax(feat, dim=2)
         return logits
     
+    def predict_batched(self, samples : List[dict], batch_size : int):
+        inf = 0
+        cross_ent_loss_s, l_inf_s, l_1_s = [], [], []
+        while inf < len(samples):
+            sup = min(len(samples), inf+batch_size)
+            batch = samples[inf:sup]
+            logits, cross_ent_loss, l_inf, l_1 = self.predict_samples(batch)
+            cross_ent_loss_s.append(cross_ent_loss.item())
+            l_inf_s.append(l_inf.item())
+            l_1_s.append(l_1.item())
+            inf += batch_size
+        cross_ent_loss_mean = np.mean(cross_ent_loss_s)
+        l_inf_mean = np.mean(l_inf_s)
+        l_1_mean = np.mean(l_1_s)
+        return cross_ent_loss_mean, l_inf_mean, l_1_mean
+
     def predict_samples(self, samples : List[dict]):
         logits = self.infer(samples)
         cross_ent_loss = 0.
@@ -145,7 +176,7 @@ class Model(nn.Module):
 
         print(f"L_inf = {l_inf.item()} ; L_1 = {l_1.item()}")
 
-class Block(nn.Module):
+class MHALayer(nn.Module):
     def __init__(self, dim, ffdim, nheads=4) -> None:
         super().__init__()
         self.dim = dim
@@ -176,6 +207,15 @@ def gen_ckpt_idxes():
         idx += delta
         yield idx
 
+def save_df(df, filepath):
+    df.to_csv(filepath)
+    words : list = filepath.split(".")
+    words.insert(len(words)-1, "copy")
+    filepath_copy = ".".join(words)
+    if os.path.exists(filepath_copy):
+        os.remove(filepath_copy)
+    shutil.copy(filepath, filepath_copy)
+
 def main(model = None, params : dict = None):
     assert (model is None) == (params is None)
 
@@ -185,8 +225,10 @@ def main(model = None, params : dict = None):
     
     model.train()
 
-    dataset = json.load(open("./november_dataset.data", "r"))
+    # dataset = json.load(open("./november_dataset.data", "r"))
+    dataset = json.load(open(params["train"]["dataset"], "r"))
     dataset = pad_samples(dataset)
+
     split = params["train"]["split"]
     train_val_split = int(split * len(dataset))
     train_dataset = dataset[:train_val_split]
@@ -194,63 +236,63 @@ def main(model = None, params : dict = None):
     print(f"Train ({train_val_split}) / validation ({len(dataset) - train_val_split}) ratio = {split}")
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    exp_dir = os.path.join(".", TRAINING_DIR, f"{timestamp}_november_blocks{params['model']['blocks']}-{params['model']['dim']}_split{params['train']['split']}")
+    exp_dir = os.path.join(".", TRAINING_DIR, f"{timestamp}_blocks{params['model']['blocks']}-{params['model']['dim']}_split{params['train']['split']}")
     os.makedirs(exp_dir)
-    json.dump(params, open(os.path.join(exp_dir, PARAMS_FILENAME), "w"))
+    json.dump(params, open(os.path.join(exp_dir, PARAMS_FILENAME), "w"), indent=4)
     metrics_df = pd.DataFrame()
-    n_epochs = 10000
+    n_epochs = 30000
     ckpt_idxes = gen_ckpt_idxes()
     next_epock_save_idx = next(ckpt_idxes)
     epoch = 0
     batch_size = 256
+    metrics_filepath = os.path.join(exp_dir, "metrics.csv")
     while epoch < n_epochs:
+        model.train()
+
         cross_ent_loss, l_inf, l_1 = model.learn(train_dataset, batch_size)
         
         cross_ent_loss = cross_ent_loss.item()
         l_inf = l_inf.item()
         l_1 = l_1.item()
         metrics_row = {
+            "epoch": epoch,
             "training_loss": cross_ent_loss,
             "training_L_inf": l_inf,
             "training_L_1": l_1,
         }
 
         if epoch == next_epock_save_idx:
-            logits, cross_ent_loss, l_inf, l_1 = model.predict_samples(np.random.choice(val_dataset, size=batch_size))
-            cross_ent_loss = cross_ent_loss.item()
-            l_inf = l_inf.item()
-            l_1 = l_1.item()
+            model.eval()
+            cross_ent_loss, l_inf, l_1 = model.predict_batched(np.random.choice(val_dataset, size=batch_size*8), batch_size)
             metrics_row.update({
                 "val_loss": cross_ent_loss,
                 "val_L_inf": l_inf,
                 "val_L_1": l_1,
             })
 
-        metrics_df = metrics_df.append(metrics_row, ignore_index=True)
+            next_epock_save_idx = next(ckpt_idxes)
+            torch.save(model.state_dict(), os.path.join(exp_dir, f"{epoch}.ckpt"))
 
         print(epoch, metrics_row)
-        if epoch == next_epock_save_idx:
-            next_epock_save_idx = next(ckpt_idxes)
-            torch.save(model.state_dict(), f"{exp_dir}/{epoch}.ckpt")
-        
-        metrics_df.to_csv(f"{exp_dir}/metrics.csv")
+        metrics_df = metrics_df.append(metrics_row, ignore_index=True)
+        save_df(metrics_df, metrics_filepath)
         
         epoch += 1
 
-    torch.save(model.state_dict(), f"{exp_dir}/{epoch}.ckpt")
-    metrics_df.to_csv(f"{exp_dir}/metrics.csv")
+    torch.save(model.state_dict(), os.path.join(exp_dir, f"{epoch}.ckpt"))
+    save_df(metrics_df, metrics_filepath)
 
     model.eval()
     
-    idx = 0
-    b = 1
-    while 1:
-        if b:
-            idx = (idx + 1001) % len(train_dataset)
-            model.predict(train_dataset[idx])
-        else:
-            idx = (idx + 1001) % len(val_dataset)
-            model.predict(val_dataset[idx])
+    # idx = 0
+    # b = 1
+    # while 1:
+    #     if b:
+    #         idx = (idx + 1001) % len(train_dataset)
+    #         model.predict(train_dataset[idx])
+    #     else:
+    #         idx = (idx + 1001) % len(val_dataset)
+    #         model.predict(val_dataset[idx])
 
 def pursue_training(training_dirname):
     training_dir = os.path.join(TRAINING_DIR, training_dirname)

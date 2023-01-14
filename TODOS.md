@@ -6,9 +6,17 @@
 - Have richer information on undetermined card changes
 - Add relics and some more state to the input of the model
 - In second part of bakward_forward, resolving later floors first does not make sense because the accumulated delta is the total delta!!!
-- Deal with Cursed key?
 - Deal with parasite from wriggling horror?
 - Tinyhouse: skipped cards are not logged, the added card is put together with the rare pick
+
+### Records of diff scores
+
+Processed SlayTheData_win_a20_ic_21400.json.
+
+```
+Diff score over 21399 runs = 26569, 9274 could not be reconstructed.
+Dumped dataset of 403870 samples into SlayTheData_win_a20_ic_21400.data
+```
 
 ## Model
 
