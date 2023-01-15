@@ -6,7 +6,7 @@ import os, os.path
 import json
 import torch
 
-from sts_ml.train import Model, pad_samples, TRAINING_DIR, PARAMS_FILENAME
+from sts_ml.train import Model, pad_samples, TRAINING_DIR, PARAMS_FILENAME, TOKENS_FILENAME
 
 def main():
     dataset = json.load(open("./draft_dataset.data", "r"))
@@ -16,9 +16,7 @@ def main():
     ckpt = 3486
     training_dir = os.path.join(".", TRAINING_DIR, training_dirname)
 
-    params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
-    model = Model(params)
-    model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
+    model = Model.load_model(training_dir, ckpt)
     model.eval()
 
     train_val_split = int(0.8*len(dataset))
@@ -36,7 +34,8 @@ def count_parameters(parameters):
 def generate_metrics(training_dirname):
 
     training_dir = os.path.join(".", TRAINING_DIR, training_dirname)
-    params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
+    model = Model.load_model(training_dir, ckpt=None)
+    params = model.params
 
     # dataset = json.load(open("./SlayTheData_win_a20_ic_21400.data", "r"))
     dataset = json.load(open(params["train"]["dataset"], "r"))
@@ -54,7 +53,7 @@ def generate_metrics(training_dirname):
     order = np.argsort(ckpts)
     ckpts = np.array(ckpts)[order]
     ckpt_filenames = np.array(ckpt_filenames)[order]
-    model = Model(params)
+
     for ckpt_filename, ckpt in zip(ckpt_filenames, ckpts):
         state_dict = torch.load(ckpt_filename)
         assert count_parameters(list(model.parameters())) == count_parameters(list(state_dict.values()))

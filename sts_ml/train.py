@@ -20,12 +20,7 @@ CARD_TOKENS = [PAD_TOKEN] + list(ALL_CARDS_FORMATTED)
 ALL_TOKENS = CARD_TOKENS + list(DECISIVE_RELICS_FORMATTED)
 TRAINING_DIR = "trainings"
 PARAMS_FILENAME = "params.json"
-
-def token_to_index(token : str):
-    name = card_to_name(token)
-    assert name in ALL_TOKENS, name
-    index = ALL_TOKENS.index(name)
-    return index
+TOKENS_FILENAME = "tokens.json"
 
 def pad_samples(samples : List[dict]):
     seq_max_size = 0
@@ -55,15 +50,22 @@ def unpad(sample):
     return sample
 
 class Model(nn.Module):
-    def __init__(self, params) -> None:
+    def load_model(training_dir : str, ckpt : int) -> "Model":
+        params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
+        tokens = json.load(open(os.path.join(training_dir, TOKENS_FILENAME), "r"))
+        model = Model(params=params, tokens=tokens)
+        if ckpt is not None:
+            model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
+        return model
+
+    def __init__(self, params, tokens) -> None:
         super().__init__()
         
+        self.params = params
         self.dim = dim = params["model"]["dim"]
         if params["model"].get("read_relics", False):
-            tokens = ALL_TOKENS
             raise NotImplementedError("Wip: implement the forward pass")
-        else:
-            tokens = CARD_TOKENS
+        self.tokens = tokens
         self.embedding = nn.Embedding(len(tokens), dim)
         if params["model"]["block_class"] == "MHALayer":
             blocks = [MHALayer(dim, params["model"]["ffdim"], 4) for _ in range(params["model"]["blocks"])]
@@ -78,6 +80,12 @@ class Model(nn.Module):
         self.to(device)
 
         self.opt = torch.optim.Adam(self.parameters(), lr=params["train"]["lr"])
+    
+    def token_to_index(self, token : str):
+        name = card_to_name(token)
+        assert name in self.tokens, name
+        index = self.tokens.index(name)
+        return index
 
     def forward(self, idxes : torch.tensor, deck_sizes : np.ndarray, n_upgrades : torch.tensor):
         feat = self.embedding(idxes)
@@ -145,7 +153,7 @@ class Model(nn.Module):
         n_upgrades = []
         for sample in padded_samples:
             tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
-            idxes = [token_to_index(token) for token in tokens]
+            idxes = [self.token_to_index(token) for token in tokens]
             batched_idxes.append(idxes)
             deck_sizes.append(len(sample["deck"]))
             n_upgrades.append([card_to_n_upgrades(token) for token in tokens])
@@ -229,7 +237,7 @@ def main(model = None, params : dict = None):
 
     if model is None:
         from sts_ml.params import params
-        model = Model(params)
+        model = Model(params, ALL_TOKENS)
     
     model.train()
 
@@ -247,6 +255,7 @@ def main(model = None, params : dict = None):
     exp_dir = os.path.join(".", TRAINING_DIR, f"{timestamp}_blocks{params['model']['blocks']}-{params['model']['dim']}_split{params['train']['split']}")
     os.makedirs(exp_dir)
     json.dump(params, open(os.path.join(exp_dir, PARAMS_FILENAME), "w"), indent=4)
+    json.dump(model.tokens, open(os.path.join(exp_dir, TOKENS_FILENAME), "w"), indent=4)
     metrics_df = pd.DataFrame()
     n_epochs = 30000
     ckpt_idxes = gen_ckpt_idxes()
@@ -305,7 +314,8 @@ def main(model = None, params : dict = None):
 def pursue_training(training_dirname):
     training_dir = os.path.join(TRAINING_DIR, training_dirname)
     params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
-    model = Model(params=params)
+    tokens = json.load(open(os.path.join(training_dir, TOKENS_FILENAME), "r"))
+    model = Model(params=params, tokens=tokens)
 
     ckpt = 561
     model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
