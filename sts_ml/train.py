@@ -13,11 +13,11 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from sts_ml.deck_history import ALL_CARDS_FORMATTED, card_to_name, card_to_n_upgrades, DECISIVE_RELICS_FORMATTED
+from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades
 
 PAD_TOKEN = "PAD_TOKEN"
 CARD_TOKENS = [PAD_TOKEN] + list(ALL_CARDS_FORMATTED)
-ALL_TOKENS = CARD_TOKENS + list(DECISIVE_RELICS_FORMATTED)
+CARD_AND_RELIC_TOKENS = CARD_TOKENS + list(ALL_RELICS_FORMATTED)
 TRAINING_DIR = "trainings"
 PARAMS_FILENAME = "params.json"
 TOKENS_FILENAME = "tokens.json"
@@ -58,22 +58,26 @@ class Model(nn.Module):
             model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
         return model
 
-    def __init__(self, params, tokens) -> None:
+    def __init__(self, params, tokens=None) -> None:
         super().__init__()
         
         self.params = params
         self.dim = dim = params["model"]["dim"]
-        if params["model"].get("read_relics", False):
-            raise NotImplementedError("Wip: implement the forward pass")
+        if tokens is None:
+            if params["model"].get("read_relics", False):
+                tokens = CARD_AND_RELIC_TOKENS
+                raise NotImplementedError("Wip: implement the forward pass")
+            else:
+                tokens = CARD_TOKENS
         self.tokens = tokens
         self.embedding = nn.Embedding(len(tokens), dim)
         if params["model"]["block_class"] == "MHALayer":
-            blocks = [MHALayer(dim, params["model"]["ffdim"], 4) for _ in range(params["model"]["blocks"])]
+            blocks = [MHALayer(dim, params["model"]["ffdim"], 4, params["model"].get("enable_pad_mask")) for _ in range(params["model"]["blocks"])]
         elif params["model"]["block_class"] == "Linear":
             blocks = [nn.Linear(dim, dim) for _ in range(params["model"]["blocks"])]
         else:
             assert False
-        self.blocks = nn.Sequential(*blocks)
+        self.blocks = nn.ModuleList(blocks)
         self.projection = nn.Linear(dim, 2)
 
         self.device = device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -87,16 +91,25 @@ class Model(nn.Module):
         index = self.tokens.index(name)
         return index
 
-    def forward(self, idxes : torch.tensor, deck_sizes : np.ndarray, n_upgrades : torch.tensor):
+    def forward(self, idxes : torch.tensor, deck_sizes : np.ndarray, n_upgrades : torch.tensor, pad_lefts : np.ndarray):
         feat = self.embedding(idxes)
         n_upgrades = torch.clip(n_upgrades, 0, 1)
         for idx, deck_size in enumerate(deck_sizes):
             feat[idx,:deck_size,-1] = 0
             feat[idx,deck_size:,-1] = 1
             feat[idx,:,-2] = n_upgrades[idx]
-        feat = self.blocks(feat)
+        
+        kwargs = {}
+        if self.params["model"]["block_class"] == "MHALayer":
+            kwargs.update({
+                "pad_lefts": pad_lefts,
+            })
+        for block in self.blocks:
+            feat = block.forward(feat, **kwargs)
+
         feat = self.projection(feat)
         logits = torch.softmax(feat, dim=2)
+
         return logits
     
     def predict_batched(self, samples : List[dict], batch_size : int):
@@ -151,18 +164,21 @@ class Model(nn.Module):
         batched_idxes = []
         deck_sizes = []
         n_upgrades = []
+        pad_lefts = []
         for sample in padded_samples:
             tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
             idxes = [self.token_to_index(token) for token in tokens]
             batched_idxes.append(idxes)
             deck_sizes.append(len(sample["deck"]))
             n_upgrades.append([card_to_n_upgrades(token) for token in tokens])
+            pad_lefts.append(idxes.count(0)) # cound pad tokens
         batched_idxes = np.array(batched_idxes)
         batched_idxes = torch.from_numpy(batched_idxes).to(self.device)
         deck_sizes = np.array(deck_sizes)
         n_upgrades = np.array(n_upgrades)
         n_upgrades = torch.from_numpy(n_upgrades).to(self.device)
-        logits = self.forward(batched_idxes, deck_sizes=deck_sizes, n_upgrades=n_upgrades)
+        pad_lefts = np.array(pad_lefts)
+        logits = self.forward(batched_idxes, deck_sizes=deck_sizes, n_upgrades=n_upgrades, pad_lefts=pad_lefts)
         return logits
     
     def predict(self, sample : dict):
@@ -191,7 +207,7 @@ class Model(nn.Module):
         print(f"L_inf = {l_inf.item()} ; L_1 = {l_1.item()}")
 
 class MHALayer(nn.Module):
-    def __init__(self, dim, ffdim, nheads=4) -> None:
+    def __init__(self, dim, ffdim, nheads=4, enable_pad_mask=False) -> None:
         super().__init__()
         self.dim = dim
         self.att = nn.MultiheadAttention(dim, nheads, batch_first=True)
@@ -201,9 +217,17 @@ class MHALayer(nn.Module):
         self.ff2 = nn.Linear(ffdim, dim)
         self.ln2 = nn.LayerNorm(dim)
         self.attn_weights = None
+        self.enable_pad_mask = enable_pad_mask
     
-    def forward(self, feat):
-        mha_feat, attn_weights = self.att(feat, feat, feat)
+    def forward(self, feat : torch.tensor, pad_lefts : np.ndarray):
+        batch_size, seq_len, dim = feat.shape
+        if self.enable_pad_mask:
+            key_padding_mask = torch.zeros((batch_size, seq_len), dtype=torch.bool).to(feat.device)
+            for batch_idx, pad_left in enumerate(pad_lefts):
+                key_padding_mask[batch_idx, :pad_left] = 1
+        else:
+            key_padding_mask = None
+        mha_feat, attn_weights = self.att(feat, feat, feat, key_padding_mask=key_padding_mask)
         self.attn_weights = attn_weights
         feat = feat + mha_feat
         feat = self.ln1(feat)
@@ -237,15 +261,18 @@ def main(model = None, params : dict = None):
 
     if model is None:
         from sts_ml.params import params
-        model = Model(params, ALL_TOKENS)
+        model = Model(params)
     
     model.train()
 
     # dataset = json.load(open("./november_dataset.data", "r"))
     data = json.load(open(params["train"]["dataset"], "r"))
-    data_tokens = data["items"]
-    dataset = data["dataset"]
-    assert set(model.tokens).issubset(set(data_tokens) | PAD_TOKEN), set.symmetric_difference(set(model.tokens), set(data_tokens) | PAD_TOKEN)
+    if "dataset" in data:
+        data_tokens = data["items"]
+        dataset = data["dataset"]
+        assert set(model.tokens).issubset(set(data_tokens) | PAD_TOKEN), set.symmetric_difference(set(model.tokens), set(data_tokens) | PAD_TOKEN)
+    else: # backward compat
+        dataset = data
     dataset = pad_samples(dataset)
 
     split = params["train"]["split"]

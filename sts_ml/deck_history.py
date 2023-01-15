@@ -66,13 +66,13 @@ def is_a_card(card : str):
 
 def format_string(card_name : str):
     card_name = card_name.replace(' ', '')
-    card_name = card_name.replace("'", '')
-    card_name = card_name.replace("-", '')
-    card_name = card_name.replace(".", '')
-    card_name = card_name.lower()
-    for color in ['r', 'g', 'b', 'p']:
-        card_name = card_name.replace(f'strike_{color}', 'strike')
-        card_name = card_name.replace(f'defend_{color}', 'defend')
+    # card_name = card_name.replace("'", '')
+    # card_name = card_name.replace("-", '')
+    # card_name = card_name.replace(".", '')
+    # card_name = card_name.lower()
+    # for color in ['r', 'g', 'b', 'p']:
+    #     card_name = card_name.replace(f'strike_{color}', 'strike')
+    #     card_name = card_name.replace(f'defend_{color}', 'defend')
     return card_name
 
 ATTACK_CARDS_FORMATTED = [format_string(_) for _ in BASE_GAME_ATTACKS]
@@ -795,10 +795,12 @@ def main():
                 print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
             computed_run += 1
             total_diff_l0 += int(diff > 0)
+        if run_idx > 10:
+            break
     print(f"Diff score over {computed_run} runs = {total_diff_l1}, {total_diff_l0} could not be reconstructed.")
 
     git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
-    filepath = f"./SlayTheData_win_a20_ic_21400_{git_hash}.data"
+    filepath = f"./SlayTheData_win_a20_ic_21400_{git_hash}_{computed_run}.data"
     items = ALL_CARDS_FORMATTED + ALL_RELICS_FORMATTED
     data = {
         "dataset": draft_dataset,

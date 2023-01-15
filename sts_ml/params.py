@@ -9,8 +9,8 @@ params = {
         "dim": 256,
         # "ffdim": 512,
         "blocks": 4,
-        "read_relics": False,
         "block_class": "MHALayer", # MHALayer, Linear
+        "enable_pad_mask": True,
     },
 }
 
