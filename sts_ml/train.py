@@ -242,7 +242,10 @@ def main(model = None, params : dict = None):
     model.train()
 
     # dataset = json.load(open("./november_dataset.data", "r"))
-    dataset = json.load(open(params["train"]["dataset"], "r"))
+    data = json.load(open(params["train"]["dataset"], "r"))
+    data_tokens = data["items"]
+    dataset = data["dataset"]
+    assert set(model.tokens).issubset(set(data_tokens) | PAD_TOKEN), set.symmetric_difference(set(model.tokens), set(data_tokens) | PAD_TOKEN)
     dataset = pad_samples(dataset)
 
     split = params["train"]["split"]

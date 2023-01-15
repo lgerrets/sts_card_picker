@@ -1,3 +1,4 @@
+import subprocess
 from glob import glob
 import datetime
 import re
@@ -29,7 +30,7 @@ OLDER_CARDS = ["Conserve Battery", "Underhanded Strike", "Path To Victory", "Cle
 
 BASE_GAME_RELICS = ['Burning Blood', 'Cracked Core', 'PureWater', 'Ring of the Snake', 'Akabeko', 'Anchor', 'Ancient Tea Set', 'Art of War', 'Bag of Marbles', 'Bag of Preparation', 'Blood Vial', 'TestModSTS:BottledPlaceholderRelic', 'Bronze Scales', 'Centennial Puzzle', 'CeramicFish', 'Damaru', 'DataDisk', 'Dream Catcher', 'Happy Flower', 'Juzu Bracelet', 'Lantern', 'MawBank', 'MealTicket', 'Nunchaku', 'Oddly Smooth Stone', 'Omamori', 'Orichalcum', 'Pen Nib', 'TestModSTS:PlaceholderRelic2', 'Potion Belt', 'PreservedInsect', 'Red Skull', 'Regal Pillow', 'TestModSTS:DefaultClickableRelic', 'Smiling Mask', 'Snake Skull', 'Strawberry', 'Boot', 'Tiny Chest', 'Toy Ornithopter', 'Vajra', 'War Paint', 'Whetstone', 'Blue Candle', 'Bottled Flame', 'Bottled Lightning', 'Bottled Tornado', 'Darkstone Periapt', 'Yang', 'Eternal Feather', 'Frozen Egg 2', 'Cables', 'Gremlin Horn', 'HornCleat', 'InkBottle', 'Kunai', 'Letter Opener', 'Matryoshka', 'Meat on the Bone', 'Mercury Hourglass', 'Molten Egg 2', 'Mummified Hand', 'Ninja Scroll', 'Ornamental Fan', 'Pantograph', 'Paper Crane', 'Paper Frog', 'Pear', 'Question Card', 'Self Forming Clay', 'Shuriken', 'Singing Bowl', 'StrikeDummy', 'Sundial', 'Symbiotic Virus', 'TeardropLocket', 'The Courier', 'Toxic Egg 2', 'White Beast Statue', 'Bird Faced Urn', 'Calipers', 'CaptainsWheel', 'Champion Belt', 'Charon\'s Ashes', 'CloakClasp', 'Dead Branch', 'Du-Vu Doll', 'Emotion Chip', 'FossilizedHelix', 'Gambling Chip', 'Ginger', 'Girya', 'GoldenEye', 'Ice Cream', 'Incense Burner', 'Lizard Tail', 'Magic Flower', 'Mango', 'Old Coin', 'Peace Pipe', 'Pocketwatch', 'Prayer Wheel', 'Shovel', 'StoneCalendar', 'The Specimen', 'Thread and Needle', 'Tingsha', 'Torii', 'Tough Bandages', 'TungstenRod', 'Turnip', 'Unceasing Top', 'WingedGreaves', 'Astrolabe', 'Black Blood', 'Black Star', 'Busted Crown', 'Calling Bell', 'Coffee Dripper', 'Cursed Key', 'Ectoplasm', 'Empty Cage', 'FrozenCore', 'Fusion Hammer', 'HolyWater', 'HoveringKite', 'Inserter', 'Mark of Pain', 'Nuclear Battery', 'Pandora\'s Box', 'Philosopher\'s Stone', 'Ring of the Serpent', 'Runic Cube', 'Runic Dome', 'Runic Pyramid', 'SacredBark', 'SlaversCollar', 'Snecko Eye', 'Sozu', 'Tiny House', 'Velvet Choker', 'VioletLotus', 'WristBlade', 'Bloody Idol', 'CultistMask', 'Enchiridion', 'FaceOfCleric', 'Golden Idol', 'GremlinMask', 'Mark of the Bloom', 'MutagenicStrength', 'Nloth\'s Gift', 'NlothsMask', 'Necronomicon', 'NeowsBlessing', 'Nilry\'s Codex', 'Odd Mushroom', 'Red Mask', 'Spirit Poop', 'SsserpentHead', 'WarpedTongs', 'Brimstone', 'Cauldron', 'Chemical X', 'ClockworkSouvenir', 'DollysMirror', 'Frozen Eye', 'HandDrill', 'Lee\'s Waffle', 'Medical Kit', 'Melange', 'Membership Card', 'OrangePellets', 'Orrery', 'PrismaticShard', 'Runic Capacitor', 'Sling', 'Strange Spoon', 'TheAbacus', 'Toolbox', 'TwistedFunnel']
 
-DECISIVE_RELICS = ['Akabeko', 'Anchor', 'Ancient Tea Set', 'Art of War', 'Bag of Marbles', 'Bag of Preparation', 'Bronze Scales', 'Centennial Puzzle', 'Happy Flower', 'Lantern', 'Nunchaku', 'Oddly Smooth Stone', 'Omamori', 'Orichalcum', 'Pen Nib', 'Blue Candle', 'Gremlin Horn', 'HornCleat', 'InkBottle', 'Kunai', 'Letter Opener', 'Matryoshka', 'Meat on the Bone', 'Mummified Hand', 'Ornamental Fan', 'Pantograph', 'Paper Frog', 'Question Card', 'Self Forming Clay', 'Shuriken', 'Singing Bowl', 'StrikeDummy', 'Sundial', 'Symbiotic Virus', 'TeardropLocket', 'The Courier', 'Toxic Egg 2', 'White Beast Statue', 'Bird Faced Urn', 'Calipers', 'CaptainsWheel', 'Champion Belt', 'Charon\'s Ashes', 'CloakClasp', 'Dead Branch', 'Du-Vu Doll', 'Emotion Chip', 'FossilizedHelix', 'Gambling Chip', 'Ginger', 'Girya', 'Ice Cream', 'Incense Burner', 'Lizard Tail', 'Magic Flower', 'Pocketwatch', 'StoneCalendar', 'Thread and Needle', 'Torii', 'TungstenRod', 'Unceasing Top', 'Black Star', 'Busted Crown', 'Coffee Dripper', 'Cursed Key', 'Snecko Eye', 'Sozu', 'Velvet Choker', 'Enchiridion', 'GremlinMask', 'Mark of the Bloom', 'MutagenicStrength', 'Necronomicon', 'Nilry\'s Codex', 'Odd Mushroom', 'Red Mask', 'Brimstone', 'Chemical X', 'ClockworkSouvenir', 'Medical Kit', 'OrangePellets', 'Strange Spoon', ] # a heuristic subset of BASE_GAME_RELIC
+# DECISIVE_RELICS = ['Akabeko', 'Anchor', 'Ancient Tea Set', 'Art of War', 'Bag of Marbles', 'Bag of Preparation', 'Bronze Scales', 'Centennial Puzzle', 'Happy Flower', 'Lantern', 'Nunchaku', 'Oddly Smooth Stone', 'Omamori', 'Orichalcum', 'Pen Nib', 'Blue Candle', 'Gremlin Horn', 'HornCleat', 'InkBottle', 'Kunai', 'Letter Opener', 'Matryoshka', 'Meat on the Bone', 'Mummified Hand', 'Ornamental Fan', 'Pantograph', 'Paper Frog', 'Question Card', 'Self Forming Clay', 'Shuriken', 'Singing Bowl', 'StrikeDummy', 'Sundial', 'Symbiotic Virus', 'TeardropLocket', 'The Courier', 'Toxic Egg 2', 'White Beast Statue', 'Bird Faced Urn', 'Calipers', 'CaptainsWheel', 'Champion Belt', 'Charon\'s Ashes', 'CloakClasp', 'Dead Branch', 'Du-Vu Doll', 'Emotion Chip', 'FossilizedHelix', 'Gambling Chip', 'Ginger', 'Girya', 'Ice Cream', 'Incense Burner', 'Lizard Tail', 'Magic Flower', 'Pocketwatch', 'StoneCalendar', 'Thread and Needle', 'Torii', 'TungstenRod', 'Unceasing Top', 'Black Star', 'Busted Crown', 'Coffee Dripper', 'Cursed Key', 'Snecko Eye', 'Sozu', 'Velvet Choker', 'Enchiridion', 'GremlinMask', 'Mark of the Bloom', 'MutagenicStrength', 'Necronomicon', 'Nilry\'s Codex', 'Odd Mushroom', 'Red Mask', 'Brimstone', 'Chemical X', 'ClockworkSouvenir', 'Medical Kit', 'OrangePellets', 'Strange Spoon', ] # a heuristic subset of BASE_GAME_RELIC
 
 BASE_GAME_POTIONS = ['BloodPotion', 'Poison Potion', 'FocusPotion', 'BottledMiracle', 'Block Potion', 'Dexterity Potion', 'Energy Potion', 'Explosive Potion', 'Fire Potion', 'Strength Potion', 'Swift Potion', 'Weak Potion', 'FearPotion', 'AttackPotion', 'SkillPotion', 'PowerPotion', 'ColorlessPotion', 'SteroidPotion', 'SpeedPotion', 'BlessingOfTheForge', 'TestModSTS:PlaceholderPotion', 'ElixirPotion', 'CunningPotion', 'PotionOfCapacity', 'StancePotion', 'Regen Potion', 'Ancient Potion', 'LiquidBronze', 'GamblersBrew', 'EssenceOfSteel', 'DuplicationPotion', 'DistilledChaos', 'LiquidMemories', 'HeartOfIron', 'GhostInAJar', 'EssenceOfDarkness', 'Ambrosia', 'CultistPotion', 'Fruit Juice', 'SneckoOil', 'FairyPotion', 'SmokeBomb', 'EntropicBrew']
 
@@ -52,6 +53,7 @@ class CardType:
     (ATTACK, SKILL, POWER) = range(3)
 
 COLORLESS_CARDS = ["Dramatic Entrance", "Flash of Steel", "Mind Blast", "Swift Strike", "Hand of Greed", "Bandage Up", "Blind", "Dark Shackles", "Deep Breath", "Discovery", "Enlightenment", "Finesse", "Forethought", "Good Instincts", "Impatience", "Jack of All Trades", "Madness", "Panacea", "Panic Button", "Purity", "Trip", "Apotheosis", "Chrysalis", "Master of Strategy", "Metamorphosis", "Secret Technique", "Secret Weapon", "The Bomb", "Thinking Ahead", "Transmutation", "Violence", "Magnetism", "Mayhem", "Panache", "Sadistic Nature"]
+assert set(COLORLESS_CARDS).issubset(set(ALL_CARDS))
 
 class UnknownCard(Exception):
     def __init__(self, card, *args: object) -> None:
@@ -76,9 +78,9 @@ POWER_CARDS_FORMATTED = [format_string(_) for _ in BASE_GAME_POWERS]
 COLORLESS_CARDS_FORMATTED = [format_string(_) for _ in COLORLESS_CARDS]
 CURSE_CARDS_FORMATTED = [format_string(_) for _ in BASE_GAME_CURSES]
 ALL_CARDS_FORMATTED = [format_string(_) for _ in ALL_CARDS]
-ALL_CARDS_FORMATTED_SET = ALL_CARDS_FORMATTED
+ALL_CARDS_FORMATTED_SET = set(ALL_CARDS_FORMATTED)
 ALL_RELICS_FORMATTED = [format_string(_) for _ in BASE_GAME_RELICS]
-DECISIVE_RELICS_FORMATTED = [format_string(_) for _ in DECISIVE_RELICS]
+# DECISIVE_RELICS_FORMATTED = [format_string(_) for _ in DECISIVE_RELICS]
 
 COLOR_TO_CARDS = {
     Color.COLORLESS: COLORLESS_CARDS_FORMATTED,
@@ -318,7 +320,7 @@ class FloorDelta:
         self.chest_opened = chest_opened
 
         for card in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped:
-            if card_to_name(card) not in (ALL_CARDS_FORMATTED | {DEFINITELY_SOMETHING}):
+            if card_to_name(card) not in (ALL_CARDS_FORMATTED_SET | {DEFINITELY_SOMETHING}):
                 raise UnknownCard(card)
 
         self.cards_removed_or_transformed = []
@@ -740,7 +742,7 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
     for floor_state, floor_delta in zip(history.floor_states, history.floor_deltas):
         if len(floor_delta.cards_skipped):
             data_row = {
-                "relics": [relic for relic in floor_state.relics if (relic != DEFINITELY_SOMETHING) and (relic in DECISIVE_RELICS_FORMATTED)],
+                "relics": [relic for relic in floor_state.relics if (relic != DEFINITELY_SOMETHING) and (relic in ALL_RELICS_FORMATTED)],
                 "deck": [card for card in floor_state.cards if card_to_name(card) != DEFINITELY_SOMETHING],
                 "cards_picked": [card for card in floor_delta.cards_added if card_to_name(card) != DEFINITELY_SOMETHING],
                 "cards_skipped": [card for card in floor_delta.cards_skipped if card_to_name(card) != DEFINITELY_SOMETHING],
@@ -775,6 +777,7 @@ def main():
             success, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
         except UnknownCard as e:
             print(f"{run_idx}: Unknown card {e.card}")
+            raise e
             continue
         diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
         total_diff_l1 += diff
@@ -788,9 +791,15 @@ def main():
             total_diff_l0 += int(diff > 0)
     print(f"Diff score over {computed_run} runs = {total_diff_l1}, {total_diff_l0} could not be reconstructed.")
 
-    filepath = "./SlayTheData_win_a20_ic_21400.data"
-    json.dump(draft_dataset, open(filepath, "w"))
-    print(f"Dumped dataset of {len(draft_dataset)} samples into {filepath}")
+    git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+    filepath = f"./SlayTheData_win_a20_ic_21400_{git_hash}.data"
+    items = ALL_CARDS_FORMATTED + ALL_RELICS_FORMATTED
+    data = {
+        "dataset": draft_dataset,
+        "items": items,
+    }
+    json.dump(data, open(filepath, "w"))
+    print(f"Dumped dataset of {len(draft_dataset)} samples and {len(items)} tokens into {filepath}")
 
 def compile_datas():
     glob_expr = "./SlayTheData/*"
