@@ -15,7 +15,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sts_ml.deck_history import ALL_CARDS_FORMATTED, card_to_name, card_to_n_upgrades, DECISIVE_RELICS_FORMATTED
 
-CARD_TOKENS = ["PAD_TOKEN"] + list(ALL_CARDS_FORMATTED)
+PAD_TOKEN = "PAD_TOKEN"
+CARD_TOKENS = [PAD_TOKEN] + list(ALL_CARDS_FORMATTED)
 ALL_TOKENS = CARD_TOKENS + list(DECISIVE_RELICS_FORMATTED)
 TRAINING_DIR = "trainings"
 PARAMS_FILENAME = "params.json"
@@ -45,7 +46,12 @@ def pad_samples(samples : List[dict]):
 
 def pad_sample(sample : dict, pad_left : int):
     sample = copy.deepcopy(sample)
-    sample["deck"] = ["PAD_TOKEN"]*pad_left + sample["deck"]
+    sample["deck"] = [PAD_TOKEN]*pad_left + sample["deck"]
+    return sample
+
+def unpad(sample):
+    sample = copy.deepcopy(sample)
+    sample["deck"] = [card for card in sample["deck"] if card != PAD_TOKEN]
     return sample
 
 class Model(nn.Module):
@@ -164,7 +170,7 @@ class Model(nn.Module):
         offered_cards = sample["cards_picked"] + sample["cards_skipped"]
         card_was_picked = [1]*picked_n + [0]*skipped_n
         
-        deck = [card for card in sample["deck"] if card != "PAD_TOKEN"]
+        deck = [card for card in sample["deck"] if card != PAD_TOKEN]
         preferences = np.argsort(- pick_logits_np)
         df = {
             "cards": deck + list(np.array(offered_cards)[preferences]),
@@ -186,9 +192,11 @@ class MHALayer(nn.Module):
         self.relu = nn.ReLU()
         self.ff2 = nn.Linear(ffdim, dim)
         self.ln2 = nn.LayerNorm(dim)
+        self.attn_weights = None
     
     def forward(self, feat):
-        mha_feat = self.att(feat, feat, feat)[0]
+        mha_feat, attn_weights = self.att(feat, feat, feat)
+        self.attn_weights = attn_weights
         feat = feat + mha_feat
         feat = self.ln1(feat)
         ff_feat = self.ff2(self.relu(self.ff1(feat)))
