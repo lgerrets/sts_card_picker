@@ -1,7 +1,6 @@
 ## Priority / wip
 
-- .run processing: go from fuzzy logic to a constraint programming approach with backtracking
-- Generate a new dataset, so that it has the new format (contains its supported tokens in its metadata)
+- Make a class for inference samples
 - Train with latest modifs: mask pad tokens, relics
 
 ## .run processing
@@ -9,11 +8,10 @@
 - Be careful of modded .run
 - For now we drop out samples from the dataset that contain unknown cards
 - Finetuning the processing of vanilla .run
-- Have richer information on undetermined card changes
 - Add relics and some more state to the input of the model
 - In second part of bakward_forward, resolving later floors first does not make sense because the accumulated delta is the total delta!!!
-- Deal with parasite from wriggling horror?
 - Tinyhouse: skipped cards are not logged, the added card is put together with the rare pick
+- .run processing: go from fuzzy logic to a constraint programming approach with backtracking
 
 ### Records of diff scores
 
@@ -205,6 +203,13 @@
 #### old
 
 Processed SlayTheData_win_a20_ic_21400.json.
+
+##### 2023/01/24
+
+Diff score over 21399 runs = 19044, 7140 could not be reconstructed.
+Dumped dataset of 429404 samples and 556 tokens into ./SlayTheData_win_a20_ic_21400_837d844_21399.data
+
+##### ??
 
 ```
 Diff score over 21399 runs = 26569, 9274 could not be reconstructed.
