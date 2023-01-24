@@ -1,3 +1,4 @@
+from enum import Enum
 import subprocess
 from glob import glob
 import datetime
@@ -6,7 +7,7 @@ import copy
 from tkinter import ALL
 import numpy as np
 import json
-from typing import List
+from typing import List, Tuple
 import os, os.path
 from collections import defaultdict
 
@@ -43,14 +44,9 @@ BASE_GAME_ENEMIES = ["Blue Slaver", "Cultist", "Jaw Worm", "Looter", "2 Louse", 
 
 ALL_CARDS = BASE_GAME_ATTACKS + BASE_GAME_SKILLS + BASE_GAME_POWERS + BASE_GAME_CURSES + OLDER_CARDS
 
-class Color:
-    (RED, GREEN, BLUE, PURPLE, COLORLESS, STATUS, CURSE) = range(7)
-
-class Rarity:
-    (STARTER, COMMON, UNCOMMON, RARE) = range(4)
-
-class CardType:
-    (ATTACK, SKILL, POWER) = range(3)
+Color = Enum('Color', ['RED', 'GREEN', 'BLUE', 'PURPLE', 'COLORLESS', 'STATUS', 'CURSE'])
+Rarity = Enum('Rarity', ['STARTER', 'COMMON', 'UNCOMMON', 'RARE'])
+CardType = Enum('CardType', ['ATTACK', 'SKILL', 'POWER'])
 
 COLORLESS_CARDS = ["Dramatic Entrance", "Flash of Steel", "Mind Blast", "Swift Strike", "Hand of Greed", "Bandage Up", "Blind", "Dark Shackles", "Deep Breath", "Discovery", "Enlightenment", "Finesse", "Forethought", "Good Instincts", "Impatience", "Jack Of All Trades", "Madness", "Panacea", "Panic Button", "Purity", "Trip", "Apotheosis", "Chrysalis", "Master of Strategy", "Metamorphosis", "Secret Technique", "Secret Weapon", "The Bomb", "Thinking Ahead", "Transmutation", "Violence", "Magnetism", "Mayhem", "Panache", "Sadistic Nature"]
 assert set(COLORLESS_CARDS).issubset(set(ALL_CARDS)), set(COLORLESS_CARDS).difference(set(ALL_CARDS))
@@ -66,10 +62,10 @@ def is_a_card(card : str):
 
 def format_string(card_name : str):
     card_name = card_name.replace(' ', '')
+    card_name = card_name.lower()
     # card_name = card_name.replace("'", '')
     # card_name = card_name.replace("-", '')
     # card_name = card_name.replace(".", '')
-    # card_name = card_name.lower()
     # for color in ['r', 'g', 'b', 'p']:
     #     card_name = card_name.replace(f'strike_{color}', 'strike')
     #     card_name = card_name.replace(f'defend_{color}', 'defend')
@@ -100,6 +96,8 @@ DUMMY_DICT = {}
 DUMMY_LIST = []
 
 def card_to_name(card : str) -> str:
+    if isinstance(card, UndeterminedCard):
+        return card
     name = card.split("+")[0]
     return name
 
@@ -159,6 +157,20 @@ def upgrade_card(deck : List[str], card : str):
 DEFINITELY_SOMETHING = format_string("DEFINITELY_SOMETHING")
 
 class UndeterminedCard:
+    @staticmethod
+    def list_has_undetermined(card_list : List) -> int:
+        for idx, card in enumerate(card_list):
+            if isinstance(card, UndeterminedCard):
+                return idx
+        return -1
+    
+    def find_matching_undetermined(card_list : List, card_str : str):
+        for idx, card in enumerate(card_list):
+            if isinstance(card, UndeterminedCard):
+                if card.match(card_str):
+                    return idx
+        return -1
+
     def __init__(
         self,
         color : Color = None,
@@ -172,6 +184,9 @@ class UndeterminedCard:
         self.upgraded = upgraded
     
     def match(self, card : str):
+        if isinstance(card, UndeterminedCard):
+            return False
+
         card_name = card_to_name(card)
         
         if self.color is not None:
@@ -191,6 +206,32 @@ class UndeterminedCard:
                 return False
         
         return True
+    
+    def find_match(self, card_list : List[str], reversed_order=True):
+        it = list(enumerate(card_list))
+        if reversed_order:
+            it = reversed(it)
+        for idx, card in it:
+            if self.match(card):
+                return idx
+        return -1
+
+    def __repr__(self) -> str:
+        ret = "card"
+
+        if self.color is not None:
+            ret += "/" + str(self.color)
+        
+        if self.rarity is not None:
+            ret += "/" + str(self.rarity)
+
+        if self.card_type is not None:
+            ret += "/" + str(self.card_type)
+        
+        if self.upgraded is not None:
+            ret += "/" + str(self.upgraded)
+
+        return ret
 
 def valid_build_number(string, character):
     pattern = re.compile('[0-9]{4}-[0-9]{2}-[0-9]{2}$')
@@ -323,8 +364,9 @@ class FloorDelta:
         self.chest_opened = chest_opened
 
         for card in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped:
-            if card_to_name(card) not in (ALL_CARDS_FORMATTED_SET | {DEFINITELY_SOMETHING}):
-                raise UnknownCard(card)
+            if not isinstance(card, UndeterminedCard):
+                if card_to_name(card) not in ALL_CARDS_FORMATTED_SET:
+                    raise UnknownCard(card)
 
         self.cards_removed_or_transformed = []
 
@@ -336,12 +378,56 @@ class FloorDelta:
     
     def is_unresolved(self):
         ret = (len(self.unresolved_removed_cards) + len(self.unresolved_upgraded_cards) + len(self.unresolved_transformed_cards) + len(self.unresolved_removed_relics)) > 0
-        ret |= DEFINITELY_SOMETHING in (self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed)
+        ret |= (UndeterminedCard.list_has_undetermined(self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed) != -1)
         return ret
     
+    def _repr(self, char, items):
+        if len(items):
+            ret = char + ",".join([str(item) for item in items]) + " "
+        else:
+            ret = ""
+        return ret
+
     def __repr__(self):
         ret = f"{self.floor}, {self.is_unresolved()}, "
-        ret += ", ".join(self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped + self.relics_added + self.relics_removed + self.cards_removed_or_transformed + self.unresolved_removed_cards + self.unresolved_upgraded_cards + self.unresolved_transformed_cards + self.unresolved_removed_relics)
+        ret += self._repr("+", self.cards_added)
+        ret += self._repr("-", self.cards_removed)
+        ret += self._repr("^", self.cards_upgraded)
+        ret += self._repr("~", self.cards_transformed)
+        ret += self._repr("_", self.cards_transformed)
+        ret += self._repr("~", self.cards_skipped)
+        ret += self._repr("+", self.relics_added)
+        ret += self._repr("-", self.relics_removed)
+        ret += self._repr("-~", self.cards_removed_or_transformed)
+
+        ret += self._repr("u-", self.unresolved_removed_cards)
+        ret += self._repr("u^", self.unresolved_upgraded_cards)
+        ret += self._repr("u~", self.unresolved_transformed_cards)
+        ret += self._repr("u~", self.unresolved_removed_relics)
+
+        return ret
+
+    def __sub__(self, other : "FloorDelta"):
+        ret = FloorDelta(
+            floor = self.floor - other.floor,
+            gold_delta = self.gold_delta - other.gold_delta,
+            hp_delta = self.hp_delta - other.hp_delta,
+        )
+
+        ret.cards_added = list_difference(self.cards_added, other.cards_added)[0]
+        ret.cards_removed = list_difference(self.cards_removed, other.cards_removed)[0]
+        ret.cards_upgraded = list_difference(self.cards_upgraded, other.cards_upgraded)[0]
+        ret.cards_transformed = list_difference(self.cards_transformed, other.cards_transformed)[0]
+        ret.cards_transformed = list_difference(self.cards_transformed, other.cards_transformed)[0]
+        ret.cards_skipped = list_difference(self.cards_skipped, other.cards_skipped)[0]
+        ret.relics_added = list_difference(self.relics_added, other.relics_added)[0]
+        ret.relics_removed = list_difference(self.relics_removed, other.relics_removed)[0]
+        ret.cards_removed_or_transformed = list_difference(self.cards_removed_or_transformed, other.cards_removed_or_transformed)[0]
+        ret.unresolved_removed_cards = list_difference(self.unresolved_removed_cards, other.unresolved_removed_cards)[0]
+        ret.unresolved_upgraded_cards = list_difference(self.unresolved_upgraded_cards, other.unresolved_upgraded_cards)[0]
+        ret.unresolved_transformed_cards = list_difference(self.unresolved_transformed_cards, other.unresolved_transformed_cards)[0]
+        ret.unresolved_removed_relics = list_difference(self.unresolved_removed_relics, other.unresolved_removed_relics)[0]
+
         return ret
 
 class FloorState:
@@ -359,13 +445,49 @@ class FloorState:
         self.gold = gold
         self.hp = hp
         self.modifiers = {}
+    
+    def __repr__(self) -> str:
+        ret = str(self.floor)
+        if len(self.relics):
+            ret += ", " + ", ".join(self.relics)
+        if len(self.cards):
+            ret += ", " + ", ".join(self.cards)
+
+        return ret
+    
+    def __sub__(self, other : "FloorState"):
+        ret = FloorState(
+            floor = self.floor - other.floor,
+            cards = list_difference(self.cards, other.cards)[0],
+            relics = list_difference(self.relics, other.relics)[0],
+            gold = self.gold - other.gold,
+            hp = self.hp - other.hp,
+        )
+        return ret
+    
+    def copy(self) -> "FloorState":
+        return FloorState(
+            floor = self.floor,
+            cards = copy.deepcopy(self.cards),
+            relics = copy.deepcopy(self.relics),
+            gold = self.gold,
+            hp = self.hp,
+        )
+    
+    def __eq__(self, other):
+        ret = True
+        ret &= self.cards == other.cards
+        ret &= self.relics == other.relics
+        ret &= self.gold == other.gold
+        ret &= self.hp == other.hp
+        return ret
 
 def dispatch_found_cards(deck : list, cards_to_find : list, not_found_cards : list, do_allow_wrong_upgrade : bool = False):
     found_cards = []
     new_not_found_cards = []
     deck = copy.deepcopy(deck)
     for card in cards_to_find + not_found_cards:
-        if (card in deck) and (card_to_name(card) != DEFINITELY_SOMETHING):
+        if (card in deck) and not isinstance(card, UndeterminedCard):
             found_cards.append(card)
             deck.remove(card)
         else:
@@ -386,14 +508,32 @@ def dispatch_found_cards(deck : list, cards_to_find : list, not_found_cards : li
 
     return found_cards, new_not_found_cards
 
+def list_difference(list1 : list, list2 : list) -> Tuple[list, list]:
+    exclusively_in_list1 = copy.deepcopy(list1)
+    exclusively_in_list2 = copy.deepcopy(list2)
+
+    idx = 0
+    while idx < len(exclusively_in_list1):
+        item = exclusively_in_list1[idx]
+        if item in exclusively_in_list2:
+            exclusively_in_list2.remove(item)
+            exclusively_in_list1.pop(idx)
+        else:
+            idx += 1
+    
+    return exclusively_in_list1, exclusively_in_list2
+
+
 class History:
+    verbose = 0
+
     def __init__(self, initial_floor_state):
         self.last_resolved_floor_delta_idx = -1
         self.floor_deltas : List[FloorDelta] = []
         self.floor_states : List[FloorState] = [initial_floor_state] # states are previous to picking/skipping rewards at that floor
     
     def add(self, floor_delta : FloorDelta):
-        floor_state = copy.deepcopy(self.floor_states[-1])
+        floor_state = self.floor_states[-1].copy()
         self.floor_states.append(floor_state)
         self.floor_deltas.append(floor_delta)
 
@@ -402,6 +542,26 @@ class History:
         # for perf, only do a backward-forward pass if we have work AND new clues
         if floor_delta.is_unresolved() and (self.last_resolved_floor_delta_idx < floor_delta.floor):
             self.bakward_forward()
+    
+    @staticmethod
+    def try_to_resolve(resolved_cards, maybe_unresolved_cards, correcting_delta_cards, ignore_str=False):
+        unresolved_idx = len(maybe_unresolved_cards) - 1
+        while 0 <= unresolved_idx < len(maybe_unresolved_cards):
+            unresolved_card = maybe_unresolved_cards[unresolved_idx]
+            if isinstance(unresolved_card, UndeterminedCard):
+                correcting_idx = unresolved_card.find_match(correcting_delta_cards, reversed_order=True)
+                if correcting_idx != -1:
+                    maybe_unresolved_cards.pop(unresolved_idx)
+                    correcting_card = correcting_delta_cards.pop(correcting_idx)
+                    resolved_cards.append(correcting_card)
+            elif isinstance(unresolved_card, str):
+                if (not ignore_str) and (unresolved_card in correcting_delta_cards):
+                    maybe_unresolved_cards.pop(unresolved_idx)
+                    correcting_delta_cards.remove(unresolved_card)
+                    resolved_cards.append(unresolved_card)
+            else:
+                assert False
+            unresolved_idx -= 1
     
     def update_state_from_deltas(self, floor_state : FloorState, floor_delta : FloorDelta, correcting_floor_delta : FloorDelta = None):
         """
@@ -412,67 +572,49 @@ class History:
         floor_state.floor += 1
 
         if floor_delta.is_unresolved() and (correcting_floor_delta is not None):
-            while (DEFINITELY_SOMETHING in floor_delta.cards_added) and len(correcting_floor_delta.cards_added): # add
-                idx = floor_delta.cards_added.index(DEFINITELY_SOMETHING)
-                floor_delta.cards_added.pop(idx)
-                floor_delta.cards_added.insert(idx, correcting_floor_delta.cards_added.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.unresolved_removed_cards) and len(correcting_floor_delta.cards_removed): # remove
-                idx = floor_delta.unresolved_removed_cards.index(DEFINITELY_SOMETHING)
-                floor_delta.unresolved_removed_cards.pop(idx)
-                floor_delta.cards_removed.insert(idx, correcting_floor_delta.cards_removed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.unresolved_transformed_cards) and len(correcting_floor_delta.cards_transformed): # transform
-                idx = floor_delta.unresolved_transformed_cards.index(DEFINITELY_SOMETHING)
-                floor_delta.unresolved_transformed_cards.pop(idx)
-                floor_delta.cards_transformed.insert(idx, correcting_floor_delta.cards_transformed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.unresolved_removed_cards) and len(correcting_floor_delta.cards_removed_or_transformed): # remove
-                idx = floor_delta.unresolved_removed_cards.index(DEFINITELY_SOMETHING)
-                floor_delta.unresolved_removed_cards.pop(idx)
-                floor_delta.cards_removed.insert(idx, correcting_floor_delta.cards_removed_or_transformed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.unresolved_transformed_cards) and len(correcting_floor_delta.cards_removed_or_transformed): # transform
-                idx = floor_delta.unresolved_transformed_cards.index(DEFINITELY_SOMETHING)
-                floor_delta.unresolved_transformed_cards.pop(idx)
-                floor_delta.cards_transformed.insert(idx, correcting_floor_delta.cards_removed_or_transformed.pop(-1))
-            while (DEFINITELY_SOMETHING in floor_delta.unresolved_upgraded_cards) and len(correcting_floor_delta.cards_upgraded): # upgrades
-                idx = floor_delta.unresolved_upgraded_cards.index(DEFINITELY_SOMETHING)
-                floor_delta.unresolved_upgraded_cards.pop(idx)
-                floor_delta.cards_upgraded.insert(idx, correcting_floor_delta.cards_upgraded.pop(-1))
+            History.try_to_resolve(floor_delta.cards_added, floor_delta.cards_added, correcting_floor_delta.cards_added, ignore_str=True)
+            History.try_to_resolve(floor_delta.cards_removed, floor_delta.unresolved_removed_cards, correcting_floor_delta.cards_removed)
+            History.try_to_resolve(floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards, correcting_floor_delta.cards_transformed)
+            History.try_to_resolve(floor_delta.cards_removed, floor_delta.unresolved_removed_cards, correcting_floor_delta.cards_removed_or_transformed)
+            History.try_to_resolve(floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards, correcting_floor_delta.cards_removed_or_transformed)
+            History.try_to_resolve(floor_delta.cards_upgraded, floor_delta.unresolved_upgraded_cards, correcting_floor_delta.cards_upgraded)
 
         # here we do some processing specific to relics
 
         # for some relics, we have to do the update only once, because we update possibly non-empty list attributes ; typically, we can be sure that boss relics 
         if not floor_delta.triggered:
             if "whetstone" in floor_delta.relics_added:
-                floor_delta.cards_upgraded += [DEFINITELY_SOMETHING] * 2
+                floor_delta.cards_upgraded += [UndeterminedCard(card_type=CardType.ATTACK) for i in range(2)]
 
             if "warpaint" in floor_delta.relics_added:
-                floor_delta.cards_upgraded += [DEFINITELY_SOMETHING] * 2
+                floor_delta.cards_upgraded += [UndeterminedCard(card_type=CardType.SKILL) for i in range(2)]
             
             if "pandora'sbox" in floor_delta.relics_added:
                 transformed = [card for card in floor_state.cards if card in {'strike_r', 'defend_r'}]
                 pandoras_n_transforms = len(transformed)
                 floor_delta.cards_transformed = transformed
-                floor_delta.cards_added = [DEFINITELY_SOMETHING for i in range(pandoras_n_transforms)]
+                floor_delta.cards_added = [UndeterminedCard() for i in range(pandoras_n_transforms)]
 
             if "astrolabe" in floor_delta.relics_added:
                 n_transforms = 3
-                floor_delta.cards_transformed = [DEFINITELY_SOMETHING for i in range(n_transforms)]
-                floor_delta.cards_added = [DEFINITELY_SOMETHING for i in range(n_transforms)]
+                floor_delta.cards_transformed = [UndeterminedCard() for i in range(n_transforms)]
+                floor_delta.cards_added = [UndeterminedCard(upgraded=True) for i in range(n_transforms)]
 
             if "tinyhouse" in floor_delta.relics_added:
-                floor_delta.cards_added += [DEFINITELY_SOMETHING]
-                floor_delta.cards_upgraded += [DEFINITELY_SOMETHING]
+                floor_delta.cards_added += [UndeterminedCard()] # TODO: it's actually a skippable card reward
+                floor_delta.cards_upgraded += [UndeterminedCard()]
 
             if "omamori" in floor_delta.relics_added:
                 floor_state.modifiers["omamori_counter"] = 2
 
             if ("cursedkey" in floor_state.relics) and floor_delta.chest_opened:
-                floor_delta.cards_added += [DEFINITELY_SOMETHING]
+                floor_delta.cards_added += [UndeterminedCard(color=Color.CURSE)]
             
             if ("callingbell" in floor_delta.relics_added):
                 floor_delta.cards_added += ["curseofthebell"]
             
             if ("emptycage" in floor_delta.relics_added):
-                floor_delta.cards_removed += [DEFINITELY_SOMETHING]*2
+                floor_delta.cards_removed += [UndeterminedCard() for i in range(2)]
             
         if floor_delta.event_name is not None:
             if floor_delta.event_name == "Vampires":
@@ -495,6 +637,8 @@ class History:
         for card in floor_delta.cards_added:
             if (floor_state.modifiers.get("omamori_counter", 0) > 0) and (card in CURSE_CARDS_FORMATTED):
                 floor_state.modifiers["omamori_counter"] -= 1
+            elif isinstance(card, UndeterminedCard):
+                pass
             else:
                 if card_to_n_upgrades(card) == 0:
                     card_name = card_to_name(card)
@@ -524,11 +668,13 @@ class History:
             floor_state.cards.insert(idx, upgraded_card)
         if correcting_floor_delta is not None:
             for card in new_not_found_cards:
+                if isinstance(card, UndeterminedCard):
+                    continue
                 upgraded_card = card_to_upgrade(card)
                 if upgraded_card in correcting_floor_delta.cards_added:
                     correcting_floor_delta.cards_added.remove(upgraded_card)
                     correcting_floor_delta.cards_added.append(card)
-                elif (card in correcting_floor_delta.cards_added) or (card_to_name(card) == DEFINITELY_SOMETHING):
+                elif (card in correcting_floor_delta.cards_added) or isinstance(card, UndeterminedCard):
                     pass
                 else:
                     # assert False
@@ -544,6 +690,10 @@ class History:
         if (self.last_resolved_floor_delta_idx == floor_delta.floor - 1) and (not floor_delta.is_unresolved()):
             self.last_resolved_floor_delta_idx += 1
         floor_delta.triggered = True
+    
+    def log(self, *msg):
+        if History.verbose:
+            print(*msg)
 
     def bakward_forward(self, delta_to_master : FloorDelta = None):
         if delta_to_master is None:
@@ -558,33 +708,40 @@ class History:
                 if not floor_delta.is_unresolved():
                     continue
                 
-                # append cards that are still undetermined
-                accumulated_delta.cards_added += list(floor_delta.unresolved_removed_cards)
-                accumulated_delta.cards_added += list(floor_delta.unresolved_upgraded_cards)
-                accumulated_delta.cards_added += list(floor_delta.unresolved_transformed_cards)
+                # append cards that were assumed to have been added
+                accumulated_delta.cards_added += [card for card in floor_delta.unresolved_removed_cards if not isinstance(card, UndeterminedCard)]
+                accumulated_delta.cards_added += [card for card in floor_delta.unresolved_upgraded_cards if not isinstance(card, UndeterminedCard)]
+                accumulated_delta.cards_added += [card for card in floor_delta.unresolved_transformed_cards if not isinstance(card, UndeterminedCard)]
         else:
             accumulated_delta = delta_to_master
         
         forward_delta_idx = len(self.floor_deltas)
 
-        # resolve issues at latest floors first (probably better because it's closer to the ground truth master_deck ?)
+        # resolve issues at latest floors first (probably better because it's closer to the ground truth master_deck ? yes, say there are unknown upgrades (eg whetstone, war paint, tiny house) before and after unknown removes/transforms (eg pandora's box), if the earlier upgrades were resolved first, they would be used to upgrade the missing bash+ that is in the master deck, but actually maybe that was the later upgrade and the earlier upgrade was sunk into a card that was then removed/transformed)
         while forward_delta_idx > self.last_resolved_floor_delta_idx + 1:
             forward_delta_idx -= 1
             floor_delta = self.floor_deltas[forward_delta_idx]
             floor_state = self.floor_states[forward_delta_idx]
-            next_floor_state = copy.deepcopy(floor_state)
+            next_floor_state = floor_state.copy()
             self.update_state_from_deltas(next_floor_state, floor_delta, accumulated_delta)
             if next_floor_state.cards != self.floor_states[forward_delta_idx + 1].cards: # noticed an update, let's propagate to later floor
+                self.log("Update!")
+                self.log("old", self.floor_states[forward_delta_idx + 1])
+                self.log("new", next_floor_state)
                 self.floor_states[forward_delta_idx + 1] = next_floor_state
                 forward_pass_idx = forward_delta_idx + 1
                 while forward_pass_idx < len(self.floor_states) - 1:
-                    next_floor_state = copy.deepcopy(self.floor_states[forward_pass_idx])
+                    next_floor_state = self.floor_states[forward_pass_idx].copy()
                     floor_delta = self.floor_deltas[forward_pass_idx]
                     self.update_state_from_deltas(next_floor_state, floor_delta, accumulated_delta)
+                    self.log("old", self.floor_states[forward_pass_idx + 1])
+                    self.log("new", next_floor_state)
                     self.floor_states[forward_pass_idx + 1] = next_floor_state
                     forward_pass_idx += 1
     
     def wrap_up(self, master_deck : List[str]):
+        self.log("wrap up")
+
         master_deck = [format_string(_) for _ in master_deck]
         master_deck_copy = copy.deepcopy(master_deck)
 
@@ -613,11 +770,12 @@ class History:
         while len(master_deck_copy):
             card = master_deck_copy.pop(0)
             delta_to_master.cards_added.append(card)
-            if DEFINITELY_SOMETHING in infered_deck_copy:
-                infered_deck_copy.remove(DEFINITELY_SOMETHING)
+            found = UndeterminedCard.find_matching_undetermined(infered_deck_copy, card)
+            if found != -1:
+                infered_deck_copy.pop(found)
         while len(infered_deck_copy):
             card = infered_deck_copy.pop(0)
-            if card != DEFINITELY_SOMETHING:
+            if not isinstance(card, UndeterminedCard):
                 delta_to_master.cards_removed_or_transformed.append(card)
 
         delta_to_master_copy = copy.deepcopy(delta_to_master)
@@ -636,14 +794,13 @@ def filter_run(data : dict):
     return True
 
 def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
-    default_ret = False, FloorDelta(floor=0)
-    
-    if not filter_run(data):
-        return default_ret
-
+    if data["character_chosen"] == "IRONCLAD":
+        initial_deck = ["Defend_R"]*4 + ["Strike_R"]*5 + ["Bash", "AscendersBane"]
+    else:
+        raise NotImplementedError(data["character_chosen"])
     initial_floor_state = FloorState(
         floor = 0,
-        cards = ["Defend_R"]*4 + ["Strike_R"]*5 + ["Bash", "AscendersBane"],
+        cards = initial_deck,
     )
 
     history = History(initial_floor_state)
@@ -678,19 +835,24 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                         floor_delta_dict["relics_added"] = [data["boss_relics"][act-1]["picked"]]
                 act += 1
         elif node == "NEOW":
-            if data.get("neow_bonus", "") == "BOSS_RELIC":
+            neow_bonus = data.get("neow_bonus", "")
+            if neow_bonus == "":
+                pass
+            elif neow_bonus == "BOSS_RELIC":
                 floor_delta_dict["relics_added"] = [data["relics"][0]]
-            elif data.get("neow_bonus", "") == "ONE_RANDOM_RARE_CARD":
-                floor_delta_dict["cards_added"] = [DEFINITELY_SOMETHING]
-            elif data.get("neow_bonus", "") == "REMOVE_CARD":
-                floor_delta_dict["cards_removed"] = [DEFINITELY_SOMETHING]
-            elif data.get("neow_bonus", "") == "REMOVE_TWO":
-                floor_delta_dict["cards_removed"] = [DEFINITELY_SOMETHING]*2
-            elif data.get("neow_bonus", "") == "TRANSFORM_CARD":
-                floor_delta_dict["cards_added"] = [DEFINITELY_SOMETHING]
-                floor_delta_dict["cards_transformed"] = [DEFINITELY_SOMETHING]
-            elif data.get("neow_bonus", "") == "ONE_RARE_RELIC":
+            elif neow_bonus == "ONE_RANDOM_RARE_CARD":
+                floor_delta_dict["cards_added"] = [UndeterminedCard()]
+            elif neow_bonus == "REMOVE_CARD":
+                floor_delta_dict["cards_removed"] = [UndeterminedCard()]
+            elif neow_bonus == "REMOVE_TWO":
+                floor_delta_dict["cards_removed"] = [UndeterminedCard() for i in range(2)]
+            elif neow_bonus == "TRANSFORM_CARD":
+                floor_delta_dict["cards_added"] = [UndeterminedCard()]
+                floor_delta_dict["cards_transformed"] = [UndeterminedCard()]
+            elif neow_bonus == "ONE_RARE_RELIC":
                 floor_delta_dict["relics_added"] = [data["relics"][1]]
+            else:
+                assert False, data["neow_bonus"]
         elif node == "?":
             for event_choice in data["event_choices"]:
                 if event_choice["floor"] == floor:
@@ -749,13 +911,148 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
         if len(floor_delta.cards_skipped):
             data_row = {
                 "relics": [relic for relic in floor_state.relics if (relic != DEFINITELY_SOMETHING) and (relic in ALL_RELICS_FORMATTED)],
-                "deck": [card for card in floor_state.cards if card_to_name(card) != DEFINITELY_SOMETHING],
-                "cards_picked": [card for card in floor_delta.cards_added if card_to_name(card) != DEFINITELY_SOMETHING],
-                "cards_skipped": [card for card in floor_delta.cards_skipped if card_to_name(card) != DEFINITELY_SOMETHING],
+                "deck": [card for card in floor_state.cards if not isinstance(card, UndeterminedCard)],
+                "cards_picked": [card for card in floor_delta.cards_added if not isinstance(card, UndeterminedCard)],
+                "cards_skipped": [card for card in floor_delta.cards_skipped if not isinstance(card, UndeterminedCard)],
             }
             run_rows.append(data_row)
 
-    return (len(delta_to_master.cards_added) == 0) and (len(delta_to_master.cards_removed_or_transformed) == 0) and (len(delta_to_master.cards_upgraded) == 0), delta_to_master
+    error = (len(delta_to_master.cards_added) > 0) or (len(delta_to_master.cards_removed_or_transformed) > 0) or (len(delta_to_master.cards_upgraded) > 0)
+    warning = history.last_resolved_floor_delta_idx < len(data["path_per_floor"])
+    return not error, not warning, delta_to_master
+
+def test_reconstruct():
+    run_rows = []
+
+    relics_obtained = [
+        {
+            "key": "Whetstone", # upgrade 2 'Strike'
+            "floor": 1,
+        },
+        {
+            "key": "Pandora's Box", # get 9 'Sword Boomerangs'
+            "floor": 2,
+        },
+        {
+            "key": "Whetstone", # upgrade 'Bash' and 'Sword Boomerangs'
+            "floor": 3,
+        },
+        {
+            "key": "Omamori",
+            "floor": 4,
+        },
+        {
+            "key": "Cursed Key",
+            "floor": 5,
+        },
+        {
+            "key": "Calling Bell", # get a curse from 'Cursed Key' but negated by 'Omamori', get a curse from 'Callingbell' but negated by 'Omamori'
+            "floor": 6,
+        },
+        {
+            "key": "Empty Cage", # get 'Pain' from cursed key, remove 2 'Sword Boomerangs'
+            "floor": 7,
+        },
+    ]
+
+    master_decks = [
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"],
+        ["Strike_r"] * 3 + ["Strike_r+1"] * 2 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"],
+        ["Sword Boomerang"] * 9 + ["Bash", "AscendersBane"],
+        ["Sword Boomerang"] * 8 + ["Sword Boomerang+1", "Bash+1", "AscendersBane"],
+        ["Sword Boomerang"] * 8 + ["Sword Boomerang+1", "Bash+1", "AscendersBane"],
+        ["Sword Boomerang"] * 8 + ["Sword Boomerang+1", "Bash+1", "AscendersBane"],
+        ["Sword Boomerang"] * 8 + ["Sword Boomerang+1", "Bash+1", "AscendersBane"],
+        ["Sword Boomerang"] * 6 + ["Sword Boomerang+1", "Bash+1", "AscendersBane", "Pain"],
+    ]
+
+    max_floor = 3
+    data = {
+        "is_ascension_mode": True,
+        "character_chosen": "IRONCLAD",
+        "ascension_level": 20,
+        "victory": True,
+
+        "master_deck": master_decks[max_floor],
+        "relics": [],
+        "path_per_floor": ["T"]*max_floor,
+        "relics_obtained": relics_obtained[:max_floor],
+        "card_choices": [],
+        "neow_bonus": "",
+        "event_choices": [],
+        "campfire_choices": [],
+        "damage_taken": [],
+        "items_purchased": [],
+        "item_purchase_floors": [],
+        "items_purged": [],
+        "items_purged_floors": [],
+        "boss_relics": [],
+        "floor_reached": 51,
+
+        "is_trial": False,
+        "is_daily": False,
+        "chose_seed": False,
+        "is_endless": False,
+        "circlet_count": 0,
+        "score": 1000,
+        "player_experience": 100,
+    }
+
+    History.verbose = 1
+    success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+    print(success, no_warning, delta_to_master)
+
+
+def test_reconstruct_simple():
+    run_rows = []
+
+    relics_obtained = [
+        {
+            "key": "Whetstone", # upgrade 2 'Strike'
+            "floor": 1,
+        },
+    ]
+
+    master_decks = [
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"],
+        ["Strike_r"] * 3 + ["Strike_r+1"] * 2 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"],
+    ]
+
+    max_floor = 1
+    data = {
+        "is_ascension_mode": True,
+        "character_chosen": "IRONCLAD",
+        "ascension_level": 20,
+        "victory": True,
+
+        "master_deck": master_decks[max_floor],
+        "relics": [],
+        "path_per_floor": ["T"]*max_floor,
+        "relics_obtained": relics_obtained[:max_floor],
+        "card_choices": [],
+        "neow_bonus": "",
+        "event_choices": [],
+        "campfire_choices": [],
+        "damage_taken": [],
+        "items_purchased": [],
+        "item_purchase_floors": [],
+        "items_purged": [],
+        "items_purged_floors": [],
+        "boss_relics": [],
+        "floor_reached": 51,
+
+        "is_trial": False,
+        "is_daily": False,
+        "chose_seed": False,
+        "is_endless": False,
+        "circlet_count": 0,
+        "score": 1000,
+        "player_experience": 100,
+    }
+
+    History.verbose = 1
+    success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+    print(success, no_warning, delta_to_master)
 
 def main():
     draft_dataset = []
@@ -781,7 +1078,7 @@ def main():
         run_rows = []
         json.dump(data, open("./example_vanilla.run", "w"), indent=4)
         try:
-            success, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+            success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
         except UnknownCard as e:
             print(f"{run_idx}: Unknown card {e.card}")
             raise e
@@ -828,6 +1125,8 @@ def compile_datas():
     json.dump(compiled_datas, open("SlayTheData/SlayTheData_win_a20_ic.json", "w"))
 
 if __name__ == "__main__":
-    main()
+    # main()
     # compile_datas()
+    test_reconstruct()
+    # test_reconstruct_simple()
 
