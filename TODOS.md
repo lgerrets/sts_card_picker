@@ -1,7 +1,7 @@
 ## Priority / wip
 
-- More fuzzy logic
-- Generate a new dataset, so that it has the new format (contains its supported tokens)
+- .run processing: go from fuzzy logic to a constraint programming approach with backtracking
+- Generate a new dataset, so that it has the new format (contains its supported tokens in its metadata)
 - Train with latest modifs: mask pad tokens, relics
 
 ## .run processing

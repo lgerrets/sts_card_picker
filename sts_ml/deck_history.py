@@ -61,6 +61,8 @@ def is_a_card(card : str):
     return (name in ALL_CARDS)
 
 def format_string(card_name : str):
+    if isinstance(card_name, UndeterminedCard):
+        return card_name
     card_name = card_name.replace(' ', '')
     card_name = card_name.lower()
     # card_name = card_name.replace("'", '')
@@ -70,6 +72,97 @@ def format_string(card_name : str):
     #     card_name = card_name.replace(f'strike_{color}', 'strike')
     #     card_name = card_name.replace(f'defend_{color}', 'defend')
     return card_name
+
+class UndeterminedCard:
+    @staticmethod
+    def list_has_undetermined(card_list : List) -> int:
+        for idx, card in enumerate(card_list):
+            if isinstance(card, UndeterminedCard):
+                return idx
+        return -1
+    
+    def find_matching_undetermined(card_list : List, card_str : str):
+        for idx, card in enumerate(card_list):
+            if isinstance(card, UndeterminedCard):
+                if card.match(card_str):
+                    return idx
+        return -1
+
+    def __init__(
+        self,
+        color : Color = None,
+        rarity : Rarity = None,
+        card_type : CardType = None,
+        upgraded : bool = None,
+    ):
+        self.color = color
+        self.rarity = rarity
+        self.card_type = card_type
+        self.upgraded = upgraded
+    
+    def match(self, card : str):
+        if isinstance(card, UndeterminedCard):
+            return False
+
+        card_name = card_to_name(card)
+        
+        if self.color is not None:
+            if (self.color in COLOR_TO_CARDS) and (card_name not in COLOR_TO_CARDS[self.color]):
+                return False
+        
+        if self.rarity is not None:
+            pass # TODO
+
+        if self.card_type is not None:
+            if card_name not in CARD_TYPE_TO_CARDS[self.card_type]:
+                return False
+        
+        if self.upgraded is not None:
+            n_upgrades = card_to_n_upgrades(card)
+            if self.upgraded != (n_upgrades > 0):
+                return False
+        
+        return True
+    
+    def find_match(self, card_list : List[str], reversed_order=True):
+        it = list(enumerate(card_list))
+        if reversed_order:
+            it = reversed(it)
+        for idx, card in it:
+            if self.match(card):
+                return idx
+        return -1
+    
+    def repr_attribute(self, ret_str, attr, opened_bracket):
+        if opened_bracket:
+            ret_str += "/"
+        else:
+            ret_str += "("
+        ret_str += str(attr)
+        opened_bracket = True
+        return ret_str, opened_bracket
+
+    def __repr__(self) -> str:
+        ret = "UndeterminedCard"
+        opened_bracket = False
+
+        if self.color is not None:
+            ret, opened_bracket = self.repr_attribute(ret, self.color, opened_bracket)
+        
+        if self.rarity is not None:
+            ret, opened_bracket = self.repr_attribute(ret, self.rarity, opened_bracket)
+
+        if self.card_type is not None:
+            ret, opened_bracket = self.repr_attribute(ret, self.card_type, opened_bracket)
+            
+        if self.upgraded is not None:
+            ret, opened_bracket = self.repr_attribute(ret, self.upgraded, opened_bracket)
+        
+        if opened_bracket:
+            ret += ")"
+
+        return ret
+DEFINITELY_SOMETHING = format_string("DEFINITELY_SOMETHING")
 
 ATTACK_CARDS_FORMATTED = [format_string(_) for _ in BASE_GAME_ATTACKS]
 SKILL_CARDS_FORMATTED = [format_string(_) for _ in BASE_GAME_SKILLS]
@@ -153,85 +246,6 @@ def upgrade_card(deck : List[str], card : str):
     remove_card(deck, card)
     card = card_to_upgrade(card)
     add_card(deck, card)
-
-DEFINITELY_SOMETHING = format_string("DEFINITELY_SOMETHING")
-
-class UndeterminedCard:
-    @staticmethod
-    def list_has_undetermined(card_list : List) -> int:
-        for idx, card in enumerate(card_list):
-            if isinstance(card, UndeterminedCard):
-                return idx
-        return -1
-    
-    def find_matching_undetermined(card_list : List, card_str : str):
-        for idx, card in enumerate(card_list):
-            if isinstance(card, UndeterminedCard):
-                if card.match(card_str):
-                    return idx
-        return -1
-
-    def __init__(
-        self,
-        color : Color = None,
-        rarity : Rarity = None,
-        card_type : CardType = None,
-        upgraded : bool = None,
-    ):
-        self.color = color
-        self.rarity = rarity
-        self.card_type = card_type
-        self.upgraded = upgraded
-    
-    def match(self, card : str):
-        if isinstance(card, UndeterminedCard):
-            return False
-
-        card_name = card_to_name(card)
-        
-        if self.color is not None:
-            if card_name not in COLOR_TO_CARDS[self.color]:
-                return False
-        
-        if self.rarity is not None:
-            pass # TODO
-
-        if self.card_type is not None:
-            if card_name not in CARD_TYPE_TO_CARDS[self.card_type]:
-                return False
-        
-        if self.upgraded is not None:
-            n_upgrades = card_to_n_upgrades(card)
-            if self.upgraded != (n_upgrades > 0):
-                return False
-        
-        return True
-    
-    def find_match(self, card_list : List[str], reversed_order=True):
-        it = list(enumerate(card_list))
-        if reversed_order:
-            it = reversed(it)
-        for idx, card in it:
-            if self.match(card):
-                return idx
-        return -1
-
-    def __repr__(self) -> str:
-        ret = "card"
-
-        if self.color is not None:
-            ret += "/" + str(self.color)
-        
-        if self.rarity is not None:
-            ret += "/" + str(self.rarity)
-
-        if self.card_type is not None:
-            ret += "/" + str(self.card_type)
-        
-        if self.upgraded is not None:
-            ret += "/" + str(self.upgraded)
-
-        return ret
 
 def valid_build_number(string, character):
     pattern = re.compile('[0-9]{4}-[0-9]{2}-[0-9]{2}$')
@@ -347,6 +361,7 @@ class FloorDelta:
         player_choice : str = None,
         node : str = "",
         chest_opened : bool = False,
+        maybe_got_parasite : bool = False,
     ):
         self.floor = floor
         self.cards_added = [format_string(_) for _ in cards_added]
@@ -362,6 +377,7 @@ class FloorDelta:
         self.player_choice = player_choice
         self.node = node
         self.chest_opened = chest_opened
+        self.maybe_got_parasite = maybe_got_parasite
 
         for card in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped:
             if not isinstance(card, UndeterminedCard):
@@ -466,13 +482,15 @@ class FloorState:
         return ret
     
     def copy(self) -> "FloorState":
-        return FloorState(
+        ret = FloorState(
             floor = self.floor,
             cards = copy.deepcopy(self.cards),
             relics = copy.deepcopy(self.relics),
             gold = self.gold,
             hp = self.hp,
         )
+        ret.modifiers = copy.deepcopy(self.modifiers)
+        return ret
     
     def __eq__(self, other):
         ret = True
@@ -571,13 +589,19 @@ class History:
         """
         floor_state.floor += 1
 
-        if floor_delta.is_unresolved() and (correcting_floor_delta is not None):
-            History.try_to_resolve(floor_delta.cards_added, floor_delta.cards_added, correcting_floor_delta.cards_added, ignore_str=True)
-            History.try_to_resolve(floor_delta.cards_removed, floor_delta.unresolved_removed_cards, correcting_floor_delta.cards_removed)
-            History.try_to_resolve(floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards, correcting_floor_delta.cards_transformed)
-            History.try_to_resolve(floor_delta.cards_removed, floor_delta.unresolved_removed_cards, correcting_floor_delta.cards_removed_or_transformed)
-            History.try_to_resolve(floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards, correcting_floor_delta.cards_removed_or_transformed)
-            History.try_to_resolve(floor_delta.cards_upgraded, floor_delta.unresolved_upgraded_cards, correcting_floor_delta.cards_upgraded)
+        if correcting_floor_delta is not None:
+            if "parasite" in correcting_floor_delta.cards_added:
+                if floor_delta.maybe_got_parasite and "parasite" not in floor_delta.cards_added:
+                    correcting_floor_delta.cards_added.remove("parasite")
+                    floor_delta.cards_added.append("parasite")
+
+            if floor_delta.is_unresolved():
+                History.try_to_resolve(floor_delta.cards_added, floor_delta.cards_added, correcting_floor_delta.cards_added, ignore_str=True)
+                History.try_to_resolve(floor_delta.cards_removed, floor_delta.unresolved_removed_cards, correcting_floor_delta.cards_removed)
+                History.try_to_resolve(floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards, correcting_floor_delta.cards_transformed)
+                History.try_to_resolve(floor_delta.cards_removed, floor_delta.unresolved_removed_cards, correcting_floor_delta.cards_removed_or_transformed)
+                History.try_to_resolve(floor_delta.cards_transformed, floor_delta.unresolved_transformed_cards, correcting_floor_delta.cards_removed_or_transformed)
+                History.try_to_resolve(floor_delta.cards_upgraded, floor_delta.unresolved_upgraded_cards, correcting_floor_delta.cards_upgraded)
 
         # here we do some processing specific to relics
 
@@ -635,7 +659,8 @@ class History:
 
         # add cards
         for card in floor_delta.cards_added:
-            if (floor_state.modifiers.get("omamori_counter", 0) > 0) and (card in CURSE_CARDS_FORMATTED):
+            card_is_a_curse = (card in CURSE_CARDS_FORMATTED) or (isinstance(card, UndeterminedCard) and (card.color == Color.CURSE))
+            if (floor_state.modifiers.get("omamori_counter", 0) > 0) and card_is_a_curse:
                 floor_state.modifiers["omamori_counter"] -= 1
             elif isinstance(card, UndeterminedCard):
                 pass
@@ -724,7 +749,7 @@ class History:
             floor_state = self.floor_states[forward_delta_idx]
             next_floor_state = floor_state.copy()
             self.update_state_from_deltas(next_floor_state, floor_delta, accumulated_delta)
-            if next_floor_state.cards != self.floor_states[forward_delta_idx + 1].cards: # noticed an update, let's propagate to later floor
+            if next_floor_state.cards != self.floor_states[forward_delta_idx + 1].cards: # noticed an update, let's propagate to later floors
                 self.log("Update!")
                 self.log("old", self.floor_states[forward_delta_idx + 1])
                 self.log("new", next_floor_state)
@@ -781,6 +806,15 @@ class History:
         delta_to_master_copy = copy.deepcopy(delta_to_master)
         self.bakward_forward(delta_to_master)
 
+        if History.verbose >= 1:
+            print("Infered deltas")
+            for delta in self.floor_deltas:
+                print(delta)
+
+            print("Infered states")
+            for state in self.floor_states:
+                print(state.floor, sorted(state.cards))
+
         return delta_to_master
 
 def filter_run(data : dict):
@@ -796,6 +830,7 @@ def filter_run(data : dict):
 def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
     if data["character_chosen"] == "IRONCLAD":
         initial_deck = ["Defend_R"]*4 + ["Strike_R"]*5 + ["Bash", "AscendersBane"]
+        class_color = Color.RED
     else:
         raise NotImplementedError(data["character_chosen"])
     initial_floor_state = FloorState(
@@ -834,6 +869,16 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                     if "picked" in data["boss_relics"][act-1]:
                         floor_delta_dict["relics_added"] = [data["boss_relics"][act-1]["picked"]]
                 act += 1
+            elif node == "M":
+                found = False
+                damage_taken_data = {}
+                for damage_taken_data in data["damage_taken"]:
+                    if damage_taken_data["floor"] == floor:
+                        found = True
+                        break
+                if (act == 3) and found and (damage_taken_data["enemies"] == "Writhing Mass"):
+                    floor_delta_dict["maybe_got_parasite"] = True
+
         elif node == "NEOW":
             neow_bonus = data.get("neow_bonus", "")
             if neow_bonus == "":
@@ -841,16 +886,43 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
             elif neow_bonus == "BOSS_RELIC":
                 floor_delta_dict["relics_added"] = [data["relics"][0]]
             elif neow_bonus == "ONE_RANDOM_RARE_CARD":
-                floor_delta_dict["cards_added"] = [UndeterminedCard()]
+                floor_delta_dict["cards_added"] = [UndeterminedCard(color=class_color)]
             elif neow_bonus == "REMOVE_CARD":
-                floor_delta_dict["cards_removed"] = [UndeterminedCard()]
+                floor_delta_dict["cards_removed"] = [UndeterminedCard(color=class_color)]
             elif neow_bonus == "REMOVE_TWO":
-                floor_delta_dict["cards_removed"] = [UndeterminedCard() for i in range(2)]
+                floor_delta_dict["cards_removed"] = [UndeterminedCard(color=class_color) for i in range(2)]
             elif neow_bonus == "TRANSFORM_CARD":
-                floor_delta_dict["cards_added"] = [UndeterminedCard()]
-                floor_delta_dict["cards_transformed"] = [UndeterminedCard()]
+                floor_delta_dict["cards_added"] = [UndeterminedCard(color=class_color)]
+                floor_delta_dict["cards_transformed"] = [UndeterminedCard(color=class_color)]
+            elif neow_bonus == "TRANSFORM_TWO_CARDS":
+                floor_delta_dict["cards_added"] = [UndeterminedCard(color=class_color) for i in range(2)]
+                floor_delta_dict["cards_transformed"] = [UndeterminedCard(color=class_color) for i in range(2)]
+            elif neow_bonus == "RANDOM_COMMON_RELIC":
+                floor_delta_dict["relics_added"] = [data["relics"][1]]
             elif neow_bonus == "ONE_RARE_RELIC":
                 floor_delta_dict["relics_added"] = [data["relics"][1]]
+            elif neow_bonus == "RANDOM_COLORLESS":
+                floor_delta_dict["cards_added"] = [UndeterminedCard(color=Color.COLORLESS)]
+            elif neow_bonus == "RANDOM_COLORLESS_2":
+                floor_delta_dict["cards_added"] = [UndeterminedCard(color=Color.COLORLESS)]
+            elif neow_bonus == "THREE_ENEMY_KILL":
+                pass
+            elif neow_bonus == "HUNDRED_GOLD":
+                pass
+            elif neow_bonus == "TWO_FIFTY_GOLD":
+                pass
+            elif neow_bonus == "THREE_CARDS":
+                floor_delta_dict["cards_added"] = [UndeterminedCard(color=class_color)]
+            elif neow_bonus == "THREE_RARE_CARDS":
+                floor_delta_dict["cards_added"] = [UndeterminedCard(color=class_color, rarity=Rarity.RARE)]
+            elif neow_bonus == "TWENTY_PERCENT_HP_BONUS":
+                pass
+            elif neow_bonus == "TEN_PERCENT_HP_BONUS":
+                pass
+            elif neow_bonus == "THREE_SMALL_POTIONS":
+                pass
+            elif neow_bonus == "UPGRADE_CARD":
+                floor_delta_dict["cards_upgraded"] = [UndeterminedCard(color=class_color)]
             else:
                 assert False, data["neow_bonus"]
         elif node == "?":
@@ -957,6 +1029,7 @@ def test_reconstruct():
 
     master_decks = [
         ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"],
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"], # neow, nothing happened
         ["Strike_r"] * 3 + ["Strike_r+1"] * 2 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"],
         ["Sword Boomerang"] * 9 + ["Bash", "AscendersBane"],
         ["Sword Boomerang"] * 8 + ["Sword Boomerang+1", "Bash+1", "AscendersBane"],
@@ -966,7 +1039,9 @@ def test_reconstruct():
         ["Sword Boomerang"] * 6 + ["Sword Boomerang+1", "Bash+1", "AscendersBane", "Pain"],
     ]
 
-    max_floor = 3
+    # max_floor = len(master_decks) - 1
+    max_floor = 4
+
     data = {
         "is_ascension_mode": True,
         "character_chosen": "IRONCLAD",
@@ -975,8 +1050,8 @@ def test_reconstruct():
 
         "master_deck": master_decks[max_floor],
         "relics": [],
-        "path_per_floor": ["T"]*max_floor,
-        "relics_obtained": relics_obtained[:max_floor],
+        "path_per_floor": ["T"]*(max_floor-1), # -1 because path_per_floor does not count neow
+        "relics_obtained": relics_obtained,
         "card_choices": [],
         "neow_bonus": "",
         "event_choices": [],
@@ -1002,8 +1077,85 @@ def test_reconstruct():
     success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
     print(success, no_warning, delta_to_master)
 
+    print("Oracle states")
+    for floor, master_deck in enumerate(master_decks[:max_floor+1]):
+        print(floor, sorted(master_deck))
 
-def test_reconstruct_simple():
+
+def test_reconstruct2():
+    run_rows = []
+
+    relics_obtained = [
+        {
+            "key": "Omamori",
+            "floor": 1,
+        },
+        {
+            "key": "Cursed Key",
+            "floor": 2,
+        },
+        {
+            "key": "Calling Bell", # get a curse from 'Cursed Key' but negated by 'Omamori', get a curse from 'Callingbell' but negated by 'Omamori'
+            "floor": 3,
+        },
+        {
+            "key": "Empty Cage", # get 'Pain' from cursed key, remove 2 'Strike'
+            "floor": 4,
+        },
+    ]
+
+    master_decks = [
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"],
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"], # neow, nothing happened
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"], # omamori
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"], # cursed key
+        ["Strike_r"] * 5 + ["Defend_r"] * 4 + ["Bash", "AscendersBane"], # calling bell
+        ["Strike_r"] * 3 + ["Defend_r"] * 4 + ["Bash", "AscendersBane", "Pain"], # empty cage: remove 2 strikes, get pain from cursed key
+    ]
+
+    max_floor = len(master_decks) - 1
+    # max_floor = 4
+
+    data = {
+        "is_ascension_mode": True,
+        "character_chosen": "IRONCLAD",
+        "ascension_level": 20,
+        "victory": True,
+
+        "master_deck": master_decks[max_floor],
+        "relics": [],
+        "path_per_floor": ["T"]*(max_floor-1), # -1 because path_per_floor does not count neow
+        "relics_obtained": relics_obtained,
+        "card_choices": [],
+        "neow_bonus": "",
+        "event_choices": [],
+        "campfire_choices": [],
+        "damage_taken": [],
+        "items_purchased": [],
+        "item_purchase_floors": [],
+        "items_purged": [],
+        "items_purged_floors": [],
+        "boss_relics": [],
+        "floor_reached": 51,
+
+        "is_trial": False,
+        "is_daily": False,
+        "chose_seed": False,
+        "is_endless": False,
+        "circlet_count": 0,
+        "score": 1000,
+        "player_experience": 100,
+    }
+
+    History.verbose = 1
+    success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+    print(success, no_warning, delta_to_master)
+
+    print("Oracle states")
+    for floor, master_deck in enumerate(master_decks[:max_floor+1]):
+        print(floor, sorted(master_deck))
+
+def test_reconstruct_easy():
     run_rows = []
 
     relics_obtained = [
@@ -1054,7 +1206,10 @@ def test_reconstruct_simple():
     success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
     print(success, no_warning, delta_to_master)
 
-def main():
+def main(
+    debug_start_idx = None,
+    debug_end_idx = None,
+):
     draft_dataset = []
     # json_path = "./2019-05-31-00-53#1028.json"
     # json_path = "./november/november.json"
@@ -1070,19 +1225,24 @@ def main():
     total_diff_l0 = 0
     total_diff_l1 = 0
     computed_run = 0
+    is_debugging = (debug_start_idx is not None) or (debug_end_idx is not None)
     for run_idx, data in enumerate(datas):
-        # if run_idx < 13:
-        #     continue
+        if debug_start_idx is not None and run_idx < debug_start_idx:
+            continue
+        if debug_end_idx is not None and run_idx > debug_end_idx:
+            break
         assert set(data.keys()) == {'event'}
         data = data["event"]
         run_rows = []
-        json.dump(data, open("./example_vanilla.run", "w"), indent=4)
+        if is_debugging:
+            json.dump(data, open("./example_vanilla.run", "w"), indent=4)
         try:
             success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
         except UnknownCard as e:
-            print(f"{run_idx}: Unknown card {e.card}")
+            print(f"{run_idx}: Unknown card '{e.card}'")
+            if e.card.lower().startswith("sk?"): # one or several runs in the dataset have this issue, maybe a localization issue from STS?
+                continue
             raise e
-            continue
         diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
         total_diff_l1 += diff
         if diff < 3:
@@ -1092,9 +1252,10 @@ def main():
                 print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
             computed_run += 1
             total_diff_l0 += int(diff > 0)
-        if run_idx > 10:
-            break
     print(f"Diff score over {computed_run} runs = {total_diff_l1}, {total_diff_l0} could not be reconstructed.")
+
+    if is_debugging:
+        return
 
     git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
     filepath = f"./SlayTheData_win_a20_ic_21400_{git_hash}_{computed_run}.data"
@@ -1125,8 +1286,12 @@ def compile_datas():
     json.dump(compiled_datas, open("SlayTheData/SlayTheData_win_a20_ic.json", "w"))
 
 if __name__ == "__main__":
-    # main()
+    main(
+        debug_start_idx = None,
+        debug_end_idx = None,
+    )
     # compile_datas()
-    test_reconstruct()
-    # test_reconstruct_simple()
+    # test_reconstruct()
+    # test_reconstruct2()
+    # test_reconstruct_easy()
 
