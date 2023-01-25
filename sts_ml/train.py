@@ -258,22 +258,22 @@ def save_df(df, filepath):
 
 def main(model = None, params : dict = None):
     assert (model is None) == (params is None)
-
-    if model is None:
+    if params is None:
         from sts_ml.params import params
-        model = Model(params)
-    
-    model.train()
 
     # dataset = json.load(open("./november_dataset.data", "r"))
     data = json.load(open(params["train"]["dataset"], "r"))
     if "dataset" in data:
         data_tokens = data["items"]
         dataset = data["dataset"]
-        assert set(model.tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(model.tokens), set(data_tokens) | set([PAD_TOKEN]))
     else: # backward compat
+        data_tokens = None
         dataset = data
     dataset = pad_samples(dataset)
+
+    model = Model(params, tokens=data_tokens)
+    assert set(model.tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(model.tokens), set(data_tokens) | set([PAD_TOKEN]))
+    model.train()
 
     split = params["train"]["split"]
     train_val_split = int(split * len(dataset))
