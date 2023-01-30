@@ -1,3 +1,4 @@
+import random
 import shutil
 import os
 import pandas as pd
@@ -5,11 +6,14 @@ import copy
 from typing import List
 import json
 import numpy as np
-import torch, torch.nn as nn
-from torch.distributions import Categorical
 from datetime import datetime
 import matplotlib.pyplot as plt
 import sys
+
+import torch, torch.nn as nn
+from torch.distributions import Categorical
+from torch.utils.data import IterableDataset, DataLoader
+from torch.utils.data._utils import collate
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -49,6 +53,74 @@ def unpad(sample):
     sample["deck"] = [card for card in sample["deck"] if card != PAD_TOKEN]
     return sample
 
+def torch_to_numpy(tensor):
+    return tensor.detch().cpu().numpy()
+
+class DeckAndRewardDataset(IterableDataset):
+    PAD_INDEX = 0
+
+    def __init__(self, samples: list, tokens):
+        self.samples = samples
+        self.tokens = tokens
+        assert tokens.index(PAD_TOKEN) == DeckAndRewardDataset.PAD_INDEX
+
+    def token_to_index(self, token : str):
+        name = card_to_name(token)
+        assert name in self.tokens, name
+        index = self.tokens.index(name)
+        return index
+    
+    def generator(self):
+        while 1:
+            sample = random.choice(self.samples)
+            ret = self.preprocess(sample)
+            yield ret
+    
+    def preprocess(self, sample: dict):
+        tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
+        idxes = np.array([self.token_to_index(token) for token in tokens], dtype=int)
+        deck_n = len(sample["deck"])
+        cards_picked_n = len(sample["cards_picked"])
+        cards_skipped_n = len(sample["cards_skipped"])
+        n_upgrades = np.array([card_to_n_upgrades(token) for token in tokens], dtype=int)
+
+        ret = {
+            "token_idxes": idxes,
+            "deck_n": deck_n,
+            "cards_picked_n": cards_picked_n,
+            "cards_skipped_n": cards_skipped_n,
+            "n_upgrades": n_upgrades,
+        }
+        return ret
+
+    def __iter__(self):
+        return self.generator()
+
+    @staticmethod
+    def collate_fn(samples):
+        max_seq_len = -1
+        for sample in samples:
+            seq_len = sample["deck_n"] + sample["cards_picked_n"] + sample["cards_skipped_n"]
+            max_seq_len = max(max_seq_len, seq_len)
+        assert max_seq_len > -1, max_seq_len
+
+        for sample in samples:
+            seq_len = sample["deck_n"] + sample["cards_picked_n"] + sample["cards_skipped_n"]
+            n_pad_left = max_seq_len - seq_len
+            padding = DeckAndRewardDataset.PAD_INDEX * np.ones(n_pad_left, dtype=int)
+            sample["token_idxes"] = np.hstack([padding, sample["token_idxes"]])
+            sample["n_upgrades"] = np.hstack([padding, sample["n_upgrades"]])
+            sample["n_pad_lefts"] = n_pad_left
+        
+        ret = {}
+        for key in ["token_idxes", "n_upgrades"]:
+            ret[key] = collate.default_collate([sample[key] for sample in samples])
+        
+        for key in ["deck_n", "cards_picked_n", "cards_skipped_n", "n_pad_lefts"]:
+            ret[key] = np.array([sample[key] for sample in samples])
+
+        return ret
+
 class Model(nn.Module):
     def load_model(training_dir : str, ckpt : int) -> "Model":
         params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
@@ -69,10 +141,18 @@ class Model(nn.Module):
                 raise NotImplementedError("Wip: implement the forward pass")
             else:
                 tokens = CARD_TOKENS
+        if PAD_TOKEN not in tokens:
+            tokens = [PAD_TOKEN] + tokens
         self.tokens = tokens
+        self.pad_idx = tokens.index(PAD_TOKEN)
         self.embedding = nn.Embedding(len(tokens), dim)
         if params["model"]["block_class"] == "MHALayer":
-            blocks = [MHALayer(dim, params["model"]["ffdim"], 4, params["model"].get("enable_pad_mask")) for _ in range(params["model"]["blocks"])]
+            blocks = [MHALayer(
+                dim=dim,
+                ffdim=params["model"]["ffdim"],
+                nheads=params["model"]["nheads"],
+                mask_inter_choices=params["model"].get("mask_inter_choices")) for _ in range(params["model"]["blocks"]
+            )]
         elif params["model"]["block_class"] == "Linear":
             blocks = [nn.Linear(dim, dim) for _ in range(params["model"]["blocks"])]
         else:
@@ -90,19 +170,34 @@ class Model(nn.Module):
         assert name in self.tokens, name
         index = self.tokens.index(name)
         return index
+    
+    def forward(self, batch):
+        """
+        tensors, arrays -> logits
+        """
+        batch = self._to_device(batch)
 
-    def forward(self, idxes : torch.tensor, deck_sizes : np.ndarray, n_upgrades : torch.tensor, pad_lefts : np.ndarray):
+        idxes = batch["token_idxes"]
+        n_pad_lefts = batch["n_pad_lefts"]
+        deck_n = batch["deck_n"]
+        cards_picked_n = batch["cards_picked_n"]
+        cards_skipped_n = batch["cards_skipped_n"]
+        n_upgrades = batch["n_upgrades"]
+
         feat = self.embedding(idxes)
         n_upgrades = torch.clip(n_upgrades, 0, 1)
-        for idx, deck_size in enumerate(deck_sizes):
-            feat[idx,:deck_size,-1] = 0
-            feat[idx,deck_size:,-1] = 1
-            feat[idx,:,-2] = n_upgrades[idx]
+        for idx, n_choice in enumerate(cards_picked_n + cards_skipped_n):
+            # scalar #0 of embedding encodes whether this is a choice token
+            feat[idx,:-n_choice,0] = 0
+            feat[idx,n_choice:,0] = 1
+            # scalar #1 of embedding encodes whether this is an upgraded card
+            feat[idx,:,1] = n_upgrades[idx]
         
         kwargs = {}
         if self.params["model"]["block_class"] == "MHALayer":
             kwargs.update({
-                "pad_lefts": pad_lefts,
+                "n_pad_lefts": n_pad_lefts,
+                "n_choices": cards_picked_n + cards_skipped_n,
             })
         for block in self.blocks:
             feat = block.forward(feat, **kwargs)
@@ -112,89 +207,83 @@ class Model(nn.Module):
 
         return logits
     
-    def predict_batched(self, samples : List[dict], batch_size : int):
-        inf = 0
-        cross_ent_loss_s, l_inf_s, l_1_s = [], [], []
-        while inf < len(samples):
-            sup = min(len(samples), inf+batch_size)
-            batch = samples[inf:sup]
-            logits, cross_ent_loss, l_inf, l_1 = self.predict_samples(batch)
-            cross_ent_loss_s.append(cross_ent_loss.item())
-            l_inf_s.append(l_inf.item())
-            l_1_s.append(l_1.item())
-            inf += batch_size
-        cross_ent_loss_mean = np.mean(cross_ent_loss_s)
-        l_inf_mean = np.mean(l_inf_s)
-        l_1_mean = np.mean(l_1_s)
-        return cross_ent_loss_mean, l_inf_mean, l_1_mean
-
-    def predict_samples(self, samples : List[dict]):
-        logits = self.infer(samples)
+    def predict_batch(self, batch):
+        """
+        samples -> logits, metrics
+        """
+        bs = batch["token_idxes"].shape[0]
+        logits = self.forward(batch)
         cross_ent_loss = 0.
-        l_inf = 0.
-        l_1 = 0.
-        for sample_idx, sample in enumerate(samples):
-            deck_n = len(sample["deck"])
-            picked_n = len(sample["cards_picked"])
-            skipped_n = len(sample["cards_skipped"])
-            cross_ent_loss += - torch.sum(torch.log(logits[sample_idx, deck_n:deck_n+picked_n, 1])) - torch.sum(torch.log(logits[sample_idx, deck_n+picked_n:deck_n+picked_n+skipped_n, 0]))
-            modes = logits > 0.5
-            pred_modes = torch.concatenate([modes[sample_idx:sample_idx+1, deck_n:deck_n+picked_n, 1], modes[sample_idx:sample_idx+1, deck_n+picked_n:deck_n+picked_n+skipped_n, 0]], axis=1)
-            l_inf += 1 - torch.min(pred_modes.float())
-            l_1 += 1 - torch.mean(pred_modes.float())
-        cross_ent_loss /= len(samples)
-        l_inf /= len(samples)
-        l_1 /= len(samples)
-        return logits, cross_ent_loss, l_inf, l_1
+        top_inf_acc = 0.
+        top_true_acc = 0.
+        for sample_idx in range(bs):
+            n_pad_lefts = batch["n_pad_lefts"][sample_idx]
+            picked_n = batch["cards_picked_n"][sample_idx]
+            skipped_n = batch["cards_skipped_n"][sample_idx]
+            pred_logits = logits[sample_idx, -picked_n-skipped_n:]
+            
+            cross_ent_loss += - torch.sum(torch.log(pred_logits[:picked_n, 1])) - torch.sum(torch.log(pred_logits[picked_n:, 0]))
+            modes = pred_logits > 0.5
+            pred_modes = torch.concatenate([modes[:picked_n, 1], modes[picked_n:, 0]], axis=0).float()
+            top_inf_acc += 1 - torch.mean(pred_modes) # 0 if all modes are true, 1 if all modes are false; NOTE: it may be far from the target metric, if each card is predicted independently of others; NOTE: this was renamed from L_1
+            if picked_n == 0: # it's true to skip
+                top_true_acc += torch.max(modes[:, 1]) # 1 if picked at least one
+            else:
+                if 
+                sorted_picks_pred = torch.argsort(- pred_logits[:, 1])
+                top_picked_preds = sorted_picks_pred[:picked_n]
+                top_picked_target = torch.arange(0, picked_n, device=self.device)
+                diff = top_picked_preds[None, :] == top_picked_target[:, None]
+                score = torch.sum(diff.float()) / picked_n
+
+                top_true_acc += 1 - torch.mean(modes[:picked_n])
+        cross_ent_loss /= bs
+        top_inf_acc /= bs
+        top_true_acc /= bs
+        return logits, cross_ent_loss, top_inf_acc, top_true_acc
     
-    def learn(self, dataset, batch_size):
+    def learn(self, batch):
         self.opt.zero_grad()
-        samples = []
-        for sample_idx in range(batch_size):
-            dataset_idx = np.random.randint(len(dataset))
-            sample = dataset[dataset_idx]
-            samples.append(sample)
-        logits, cross_ent_loss, l_inf, l_1 = self.predict_samples(samples)
+        logits, cross_ent_loss, top_inf_acc, top_true_acc = self.predict_batch(batch)
         cross_ent_loss.backward()
         self.opt.step()
-        return cross_ent_loss, l_inf, l_1
+        return cross_ent_loss, top_inf_acc, top_true_acc
     
-    def infer(self, samples : dict):
-        padded_samples = pad_samples(samples)
-        batched_idxes = []
-        deck_sizes = []
-        n_upgrades = []
-        pad_lefts = []
-        for sample in padded_samples:
-            tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
-            idxes = [self.token_to_index(token) for token in tokens]
-            batched_idxes.append(idxes)
-            deck_sizes.append(len(sample["deck"]))
-            n_upgrades.append([card_to_n_upgrades(token) for token in tokens])
-            pad_lefts.append(idxes.count(0)) # cound pad tokens
-        batched_idxes = np.array(batched_idxes)
-        batched_idxes = torch.from_numpy(batched_idxes).to(self.device)
-        deck_sizes = np.array(deck_sizes)
-        n_upgrades = np.array(n_upgrades)
-        n_upgrades = torch.from_numpy(n_upgrades).to(self.device)
-        pad_lefts = np.array(pad_lefts)
-        logits = self.forward(batched_idxes, deck_sizes=deck_sizes, n_upgrades=n_upgrades, pad_lefts=pad_lefts)
-        return logits
+    def preprocess_one(self, sample: dict):
+        preprocessed_sample = self.dataset.preprocess(sample)
+        batch = DeckAndRewardDataset.collate_fn(preprocessed_sample)
+        # batch = self._to_device(batch)
+        return batch
+
+    def _to_device(self, batch: dict):
+        for key in batch:
+            if isinstance(batch[key], torch.Tensor):
+                batch[key] = batch[key].to(self.device)
+        return batch
     
-    def predict(self, sample : dict):
+    def predict_one(self, sample : dict):
+        """
+        batch of 1 sample -> print df and metrics
+        """
+        batch = self.preprocess_one(sample)
         sample_idx = 0
-        samples = [sample]
+        bs = 1
+        preprocessed_sample = batch[sample_idx]
+        logits, cross_ent_loss, top_inf_acc, top_true_acc = self.predict_batch(batch)
 
-        logits, cross_ent_loss, l_inf, l_1 = self.predict_samples(samples)
+        token_idxes = preprocessed_sample["token_idxes"][sample_idx]
+        n_pad_lefts = preprocessed_sample["n_pad_lefts"][sample_idx]
+        assert n_pad_lefts == 0
+        deck_n = preprocessed_sample["deck_n"][sample_idx]
+        picked_n = preprocessed_sample["cards_picked_n"][sample_idx]
+        skipped_n = preprocessed_sample["cards_skipped_n"][sample_idx]
+        
+        pick_logits_np = torch_to_numpy(logits[sample_idx, - picked_n - skipped_n:, 1])
 
-        deck_n = len(sample["deck"])
-        picked_n = len(sample["cards_picked"])
-        skipped_n = len(sample["cards_skipped"])
-        pick_logits_np = logits[sample_idx].detach().cpu().numpy()[- picked_n - skipped_n:,1]
+        deck = sample["deck"]
         offered_cards = sample["cards_picked"] + sample["cards_skipped"]
         card_was_picked = [1]*picked_n + [0]*skipped_n
         
-        deck = [card for card in sample["deck"] if card != PAD_TOKEN]
         preferences = np.argsort(- pick_logits_np)
         df = {
             "cards": deck + list(np.array(offered_cards)[preferences]),
@@ -204,12 +293,13 @@ class Model(nn.Module):
         df = pd.DataFrame(df)
         print(df)
 
-        print(f"L_inf = {l_inf.item()} ; L_1 = {l_1.item()}")
+        print(f"top_inf_acc = {top_inf_acc.item()} ; top_true_acc = {top_true_acc.item()}")
 
 class MHALayer(nn.Module):
-    def __init__(self, dim, ffdim, nheads=4, enable_pad_mask=False) -> None:
+    def __init__(self, dim, ffdim, nheads=4, mask_inter_choices=False) -> None:
         super().__init__()
         self.dim = dim
+        self.nheads = nheads
         self.att = nn.MultiheadAttention(dim, nheads, batch_first=True)
         self.ln1 = nn.LayerNorm(dim)
         self.ff1 = nn.Linear(dim, ffdim)
@@ -217,18 +307,36 @@ class MHALayer(nn.Module):
         self.ff2 = nn.Linear(ffdim, dim)
         self.ln2 = nn.LayerNorm(dim)
         self.attn_weights = None
-        self.enable_pad_mask = enable_pad_mask
+        self.mask_inter_choices = mask_inter_choices
     
-    def forward(self, feat : torch.tensor, pad_lefts : np.ndarray):
+    def forward(self, feat : torch.tensor, n_pad_lefts: np.ndarray, n_choices: np.ndarray):
         batch_size, seq_len, dim = feat.shape
-        if self.enable_pad_mask:
-            key_padding_mask = torch.zeros((batch_size, seq_len), dtype=torch.bool).to(feat.device)
-            for batch_idx, pad_left in enumerate(pad_lefts):
-                key_padding_mask[batch_idx, :pad_left] = 1
-        else:
-            key_padding_mask = None
-        mha_feat, attn_weights = self.att(feat, feat, feat, key_padding_mask=key_padding_mask)
+
+        bs, seq, dim = feat.shape
+
+        # NOTE: mask[i,j,k]==0 means embedding j may depend on embedding k
+        mask = torch.ones((batch_size, seq_len, seq_len), dtype=torch.bool) # disable all attentions
+        for idx in range(batch_size):
+            n_pad = n_pad_lefts[idx]
+            n_choice = n_choices[idx]
+            for idx_pad in range(n_pad):
+                mask[idx, idx_pad, idx_pad] = 0 # pad token may attend to itself (just works around nan values)
+            mask[idx, n_pad:-n_choice, n_pad:-n_choice] = 0 # deck may attend to deck
+            for idx_choice in range(n_choice):
+                mask[idx, -n_choice+idx_choice, n_pad:-n_choice] = 0 # choice may attend to deck
+                if self.mask_inter_choices:
+                    mask[idx, -n_choice+idx_choice, -n_choice+idx_choice] = 0 # choice may attend to itself
+            if not self.mask_inter_choices:
+                mask[idx, -n_choice:, -n_choice:] = 0 # choices may attend to each other
+
+        mask = mask.reshape((batch_size, 1, seq_len, seq_len))
+        mask = torch.repeat_interleave(mask, self.nheads, dim=1)
+        mask = mask.reshape((batch_size*self.nheads, seq_len, seq_len))
+        mask = mask.to(feat.device)
+        
+        mha_feat, attn_weights = self.att(feat, feat, feat, need_weights=True, average_attn_weights=True, attn_mask=mask)
         self.attn_weights = attn_weights
+
         feat = feat + mha_feat
         feat = self.ln1(feat)
         ff_feat = self.ff2(self.relu(self.ff1(feat)))
@@ -265,21 +373,44 @@ def main(model = None, params : dict = None):
     data = json.load(open(params["train"]["dataset"], "r"))
     if "dataset" in data:
         data_tokens = data["items"]
-        dataset = data["dataset"]
+        full_dataset = data["dataset"]
     else: # backward compat
         data_tokens = None
-        dataset = data
-    dataset = pad_samples(dataset)
+        full_dataset = data
 
     model = Model(params, tokens=data_tokens)
     assert set(model.tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(model.tokens), set(data_tokens) | set([PAD_TOKEN]))
     model.train()
 
     split = params["train"]["split"]
-    train_val_split = int(split * len(dataset))
-    train_dataset = dataset[:train_val_split]
-    val_dataset = dataset[train_val_split:]
-    print(f"Train ({train_val_split}) / validation ({len(dataset) - train_val_split}) ratio = {split}")
+    train_val_split = int(split * len(full_dataset))
+
+    train_dataset = DeckAndRewardDataset(
+        samples=full_dataset[:train_val_split],
+        tokens=model.tokens,
+    )
+    val_dataset = DeckAndRewardDataset(
+        samples=full_dataset[train_val_split:],
+        tokens=model.tokens,
+    )
+
+    batch_size = params["train"]["batch_size"]
+    train_dataloader = iter(DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        collate_fn=DeckAndRewardDataset.collate_fn,
+        pin_memory=True,
+        pin_memory_device=model.device,
+    ))
+    val_dataloader = iter(DataLoader(
+        dataset=val_dataset,
+        batch_size=batch_size,
+        collate_fn=DeckAndRewardDataset.collate_fn,
+        pin_memory=True,
+        pin_memory_device=model.device,
+    ))
+
+    print(f"Train ({train_val_split}) / validation ({len(full_dataset) - train_val_split}) ratio = {split}")
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     exp_dir = os.path.join(".", TRAINING_DIR, f"{timestamp}_blocks{params['model']['blocks']}-{params['model']['dim']}_split{params['train']['split']}")
@@ -291,37 +422,40 @@ def main(model = None, params : dict = None):
     ckpt_idxes = gen_ckpt_idxes()
     next_epock_save_idx = next(ckpt_idxes)
     epoch = 0
-    batch_size = 256
     metrics_filepath = os.path.join(exp_dir, "metrics.csv")
     while epoch < n_epochs:
         model.train()
 
-        cross_ent_loss, l_inf, l_1 = model.learn(train_dataset, batch_size)
+        cross_ent_loss, top_inf_acc, top_true_acc = model.learn(next(train_dataloader))
         
         cross_ent_loss = cross_ent_loss.item()
-        l_inf = l_inf.item()
-        l_1 = l_1.item()
+        top_inf_acc = top_inf_acc.item()
+        top_true_acc = top_true_acc.item()
         metrics_row = {
             "epoch": epoch,
             "training_loss": cross_ent_loss,
-            "training_L_inf": l_inf,
-            "training_L_1": l_1,
+            "training_top_inf_acc": top_inf_acc,
+            "training_top_true_acc": top_true_acc,
         }
 
         if epoch == next_epock_save_idx:
             model.eval()
-            cross_ent_loss, l_inf, l_1 = model.predict_batched(np.random.choice(val_dataset, size=batch_size*8), batch_size)
+            logits, cross_ent_loss, top_inf_acc, top_true_acc = model.predict_batch(next(val_dataloader))
+            cross_ent_loss = cross_ent_loss.item()
+            top_inf_acc = top_inf_acc.item()
+            top_true_acc = top_true_acc.item()
             metrics_row.update({
                 "val_loss": cross_ent_loss,
-                "val_L_inf": l_inf,
-                "val_L_1": l_1,
+                "val_top_inf_acc": top_inf_acc,
+                "val_top_true_acc": top_true_acc,
             })
 
             next_epock_save_idx = next(ckpt_idxes)
             torch.save(model.state_dict(), os.path.join(exp_dir, f"{epoch}.ckpt"))
 
         print(epoch, metrics_row)
-        metrics_df = metrics_df.append(metrics_row, ignore_index=True)
+        row_df = pd.DataFrame(metrics_row, index=[0])
+        metrics_df = pd.concat([metrics_df, row_df], ignore_index=True)
         save_df(metrics_df, metrics_filepath)
         
         epoch += 1

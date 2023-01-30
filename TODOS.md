@@ -1,5 +1,6 @@
 ## Priority / wip
 
+- Top true acc
 - Pad per batch, not once on the whole dataset. Use torch datasets and datloaders
 - Train with latest modifs: mask pad tokens, relics
 
