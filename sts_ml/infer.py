@@ -1,3 +1,5 @@
+import math
+import matplotlib.pyplot as plt
 import re
 import pandas as pd
 import numpy as np
@@ -7,23 +9,6 @@ import json
 import torch
 
 from sts_ml.train import Model, pad_samples, TRAINING_DIR, PARAMS_FILENAME, TOKENS_FILENAME
-
-def main():
-    dataset = json.load(open("./draft_dataset.data", "r"))
-    dataset = pad_samples(dataset)
-
-    training_dirname = "2022-12-23-21-39-39_november_blocks8"
-    ckpt = 3486
-    training_dir = os.path.join(".", TRAINING_DIR, training_dirname)
-
-    model = Model.load_model(training_dir, ckpt)
-    model.eval()
-
-    train_val_split = int(0.8*len(dataset))
-    idx = 0
-    while 1:
-        idx = (idx + 1001) % len(dataset)
-        model.predict(dataset[idx])
 
 def count_parameters(parameters):
     count = 0
@@ -60,30 +45,63 @@ def generate_metrics(training_dirname):
         model.load_state_dict(state_dict)
         model.eval()
 
-        logits, cross_ent_loss, l_inf, l_1 = model.predict_samples(np.random.choice(train_dataset, size=batch_size))
-        cross_ent_loss = cross_ent_loss.item()
-        l_inf = l_inf.item()
-        l_1 = l_1.item()
+        logits, losses = model.predict_samples(np.random.choice(train_dataset, size=batch_size))
+        losses = {f"training_{key}": value.item() for key, value in losses.items()}
         metrics_row = {
             "epoch": ckpt,
-            "training_loss": cross_ent_loss,
-            "training_L_inf": l_inf,
-            "training_L_1": l_1,
         }
+        metrics_row.update(losses)
 
-        cross_ent_loss, l_inf, l_1 = model.predict_batched(np.random.choice(val_dataset, size=batch_size*8), batch_size)
-        metrics_row.update({
-            "val_loss": cross_ent_loss,
-            "val_L_inf": l_inf,
-            "val_L_1": l_1,
-        })
+        losses = model.predict_batched(np.random.choice(val_dataset, size=batch_size*8), batch_size)
+        losses = {f"val_{key}": value.item() for key, value in losses.items()}
+        metrics_row.update(losses)
 
         metrics_df = metrics_df.append(metrics_row, ignore_index=True)
-        metrics_df.to_csv(f"{training_dir}/metrics.csv")
+        metrics_df.to_csv(f"{training_dir}/post_generated_metrics.csv")
+
+def plot_training_metrics(training_dirname):
+    plt.figure(figsize=(20,15))
+
+    df = pd.read_csv(f"trainings/{training_dirname}/metrics.csv")
+    epochs = df.epoch
+
+    plt.grid()
+
+    def plot_holed_values(epochs, values, linestyle, color):
+        xs = [x for x,val in zip(epochs, values) if not math.isnan(val)]
+        ys = [val for x,val in zip(epochs, values) if not math.isnan(val)]
+        plt.plot(xs, ys, linestyle=linestyle, color=color)
+
+    themes = [
+        ("blue", "cyan"),
+        ("orange", "yellow"),
+        ("green", "lime"),
+        ("black", "grey"),
+    ]
+    loss_name_to_color_theme = {}
+
+    for key in df.columns:
+        
+        loss_name = None
+        if key.startswith("training"):
+            loss_name = key.split("training_")[-1]
+        elif key.startswith("val"):
+            loss_name = key.split("val_")[-1]
+        if loss_name is not None:
+            if loss_name not in loss_name_to_color_theme:
+                loss_name_to_color_theme[loss_name] = themes.pop(0)
+            theme = loss_name_to_color_theme[loss_name]
+        
+        if key.startswith("training"):
+            plt.plot(epochs, list(df[key]), label=loss_name, color=theme[0])
+        elif key.startswith("val"):
+            plot_holed_values(epochs, list(df[key]), linestyle='dashed', color=theme[1])
+    plt.legend()
+
+    return df.head(len(df))
+
 
 if __name__ == "__main__":
-    # main()
-
     training_dirname = ""
     # training_dirname = "2023-01-06-23-41-35_21400_blocks4-256_split0.8"
     training_dirname = "2023-01-06-20-25-13_21400_blocks4-256_split0.8"

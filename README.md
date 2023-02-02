@@ -22,3 +22,6 @@
 
 > python sts_ml/infer.py
 
+## Dev
+
+I use VSCode which has great python extensions.

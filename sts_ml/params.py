@@ -13,7 +13,9 @@ params = {
         "blocks": 4,
         "block_class": "MHALayer", # MHALayer, Linear
         "mask_inter_choices": False,
+        "input_relics": True
     },
 }
 
-params["model"]["ffdim"] = params["model"].get("ffdim", params["model"]["dim"] * 2)
+params["model"]["ffdim"] = params["model"].get("ffdim", params["model"]["dim"] * 2) # default to 2*dim if missing
+params["model"]["input_relics"] = params["model"].get("input_relics", False) # default to False if missing

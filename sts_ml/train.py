@@ -29,16 +29,16 @@ TOKENS_FILENAME = "tokens.json"
 def pad_samples(samples : List[dict]):
     seq_max_size = 0
     for sample in samples:
-        deck_n = len(sample["deck"])
+        items_n = len(sample["deck"])
         picked_n = len(sample["cards_picked"])
         skipped_n = len(sample["cards_skipped"])
-        seq_max_size = max(seq_max_size, deck_n + picked_n + skipped_n)
+        seq_max_size = max(seq_max_size, items_n + picked_n + skipped_n)
     ret = []
     for sample in samples:
-        deck_n = len(sample["deck"])
+        items_n = len(sample["deck"])
         picked_n = len(sample["cards_picked"])
         skipped_n = len(sample["cards_skipped"])
-        pad_left = seq_max_size - deck_n - picked_n - skipped_n
+        pad_left = seq_max_size - items_n - picked_n - skipped_n
         padded_sample = pad_sample(sample, pad_left)
         ret.append(padded_sample)
     return ret
@@ -54,15 +54,16 @@ def unpad(sample):
     return sample
 
 def torch_to_numpy(tensor):
-    return tensor.detch().cpu().numpy()
+    return tensor.detach().cpu().numpy()
 
-class DeckAndRewardDataset(IterableDataset):
+class DeckDataset(IterableDataset):
     PAD_INDEX = 0
 
-    def __init__(self, samples: list, tokens):
+    def __init__(self, samples: list, tokens: list, do_relics: bool):
         self.samples = samples
         self.tokens = tokens
-        assert tokens.index(PAD_TOKEN) == DeckAndRewardDataset.PAD_INDEX
+        self.do_relics = do_relics
+        assert tokens.index(PAD_TOKEN) == DeckDataset.PAD_INDEX
 
     def token_to_index(self, token : str):
         name = card_to_name(token)
@@ -78,20 +79,27 @@ class DeckAndRewardDataset(IterableDataset):
     
     def preprocess(self, sample: dict):
         tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
+        items_n = len(sample["deck"])
+        if self.do_relics:
+            tokens = sample["relics"] + tokens
+            items_n += len(sample["relics"])
         idxes = np.array([self.token_to_index(token) for token in tokens], dtype=int)
-        deck_n = len(sample["deck"])
         cards_picked_n = len(sample["cards_picked"])
         cards_skipped_n = len(sample["cards_skipped"])
         n_upgrades = np.array([card_to_n_upgrades(token) for token in tokens], dtype=int)
 
         ret = {
             "token_idxes": idxes,
-            "deck_n": deck_n,
+            "items_n": items_n,
             "cards_picked_n": cards_picked_n,
             "cards_skipped_n": cards_skipped_n,
             "n_upgrades": n_upgrades,
         }
         return ret
+    
+    def sample_unpreprocessed(self):
+        sample = random.choice(self.samples)
+        return sample
 
     def __iter__(self):
         return self.generator()
@@ -100,14 +108,14 @@ class DeckAndRewardDataset(IterableDataset):
     def collate_fn(samples):
         max_seq_len = -1
         for sample in samples:
-            seq_len = sample["deck_n"] + sample["cards_picked_n"] + sample["cards_skipped_n"]
+            seq_len = sample["items_n"] + sample["cards_picked_n"] + sample["cards_skipped_n"]
             max_seq_len = max(max_seq_len, seq_len)
         assert max_seq_len > -1, max_seq_len
 
         for sample in samples:
-            seq_len = sample["deck_n"] + sample["cards_picked_n"] + sample["cards_skipped_n"]
+            seq_len = sample["items_n"] + sample["cards_picked_n"] + sample["cards_skipped_n"]
             n_pad_left = max_seq_len - seq_len
-            padding = DeckAndRewardDataset.PAD_INDEX * np.ones(n_pad_left, dtype=int)
+            padding = DeckDataset.PAD_INDEX * np.ones(n_pad_left, dtype=int)
             sample["token_idxes"] = np.hstack([padding, sample["token_idxes"]])
             sample["n_upgrades"] = np.hstack([padding, sample["n_upgrades"]])
             sample["n_pad_lefts"] = n_pad_left
@@ -116,7 +124,7 @@ class DeckAndRewardDataset(IterableDataset):
         for key in ["token_idxes", "n_upgrades"]:
             ret[key] = collate.default_collate([sample[key] for sample in samples])
         
-        for key in ["deck_n", "cards_picked_n", "cards_skipped_n", "n_pad_lefts"]:
+        for key in ["items_n", "cards_picked_n", "cards_skipped_n", "n_pad_lefts"]:
             ret[key] = np.array([sample[key] for sample in samples])
 
         return ret
@@ -136,7 +144,7 @@ class Model(nn.Module):
         self.params = params
         self.dim = dim = params["model"]["dim"]
         if tokens is None:
-            if params["model"].get("read_relics", False):
+            if params["model"].get("input_relics", False):
                 tokens = CARD_AND_RELIC_TOKENS
                 raise NotImplementedError("Wip: implement the forward pass")
             else:
@@ -179,7 +187,7 @@ class Model(nn.Module):
 
         idxes = batch["token_idxes"]
         n_pad_lefts = batch["n_pad_lefts"]
-        deck_n = batch["deck_n"]
+        items_n = batch["items_n"]
         cards_picked_n = batch["cards_picked_n"]
         cards_skipped_n = batch["cards_skipped_n"]
         n_upgrades = batch["n_upgrades"]
@@ -216,6 +224,8 @@ class Model(nn.Module):
         cross_ent_loss = 0.
         top_inf_acc = 0.
         top_true_acc = 0.
+        top_1_acc = 0.
+        top_1_acc_n_items = 0
         for sample_idx in range(bs):
             n_pad_lefts = batch["n_pad_lefts"][sample_idx]
             picked_n = batch["cards_picked_n"][sample_idx]
@@ -228,30 +238,43 @@ class Model(nn.Module):
             top_inf_acc += 1 - torch.mean(pred_modes) # 0 if all modes are true, 1 if all modes are false; NOTE: it may be far from the target metric, if each card is predicted independently of others; NOTE: this was renamed from L_1
             if picked_n == 0: # it's true to skip
                 top_true_acc += torch.max(modes[:, 1]) # 1 if picked at least one
+                top_1_acc += torch.max(modes[:, 1])
+                top_1_acc_n_items += 1
             else:
-                if 
-                sorted_picks_pred = torch.argsort(- pred_logits[:, 1])
-                top_picked_preds = sorted_picks_pred[:picked_n]
                 top_picked_target = torch.arange(0, picked_n, device=self.device)
+                predict_picked_n = torch.sum(pred_logits[:,1] > 0.5).item()
+                sorted_picks_pred = torch.argsort(- pred_logits[:,1])
+                top_picked_preds = sorted_picks_pred[:min(picked_n, predict_picked_n)]
                 diff = top_picked_preds[None, :] == top_picked_target[:, None]
                 score = torch.sum(diff.float()) / picked_n
+                top_true_acc += 1 - score
+                if picked_n == 1:
+                    top_1_acc += 1 - score
+                    top_1_acc_n_items += 1
 
-                top_true_acc += 1 - torch.mean(modes[:picked_n])
         cross_ent_loss /= bs
         top_inf_acc /= bs
         top_true_acc /= bs
-        return logits, cross_ent_loss, top_inf_acc, top_true_acc
+        top_1_acc /= top_1_acc_n_items
+        losses = {
+            "cross_ent_loss": cross_ent_loss,
+            "top_inf_acc": top_inf_acc,
+            "top_true_acc": top_true_acc,
+            "top_1_acc": top_1_acc,
+        }
+        return logits, losses
     
     def learn(self, batch):
         self.opt.zero_grad()
-        logits, cross_ent_loss, top_inf_acc, top_true_acc = self.predict_batch(batch)
+        logits, losses = self.predict_batch(batch)
+        cross_ent_loss = losses["cross_ent_loss"]
         cross_ent_loss.backward()
         self.opt.step()
-        return cross_ent_loss, top_inf_acc, top_true_acc
+        return losses
     
     def preprocess_one(self, sample: dict):
         preprocessed_sample = self.dataset.preprocess(sample)
-        batch = DeckAndRewardDataset.collate_fn(preprocessed_sample)
+        batch = DeckDataset.collate_fn([preprocessed_sample])
         # batch = self._to_device(batch)
         return batch
 
@@ -268,15 +291,15 @@ class Model(nn.Module):
         batch = self.preprocess_one(sample)
         sample_idx = 0
         bs = 1
-        preprocessed_sample = batch[sample_idx]
-        logits, cross_ent_loss, top_inf_acc, top_true_acc = self.predict_batch(batch)
+        logits, losses = self.predict_batch(batch)
+        losses = {key: value.item() for key, value in losses.items()}
 
-        token_idxes = preprocessed_sample["token_idxes"][sample_idx]
-        n_pad_lefts = preprocessed_sample["n_pad_lefts"][sample_idx]
+        token_idxes = batch["token_idxes"][sample_idx]
+        n_pad_lefts = batch["n_pad_lefts"][sample_idx]
         assert n_pad_lefts == 0
-        deck_n = preprocessed_sample["deck_n"][sample_idx]
-        picked_n = preprocessed_sample["cards_picked_n"][sample_idx]
-        skipped_n = preprocessed_sample["cards_skipped_n"][sample_idx]
+        items_n = batch["items_n"][sample_idx]
+        picked_n = batch["cards_picked_n"][sample_idx]
+        skipped_n = batch["cards_skipped_n"][sample_idx]
         
         pick_logits_np = torch_to_numpy(logits[sample_idx, - picked_n - skipped_n:, 1])
 
@@ -293,7 +316,7 @@ class Model(nn.Module):
         df = pd.DataFrame(df)
         print(df)
 
-        print(f"top_inf_acc = {top_inf_acc.item()} ; top_true_acc = {top_true_acc.item()}")
+        print(losses)
 
 class MHALayer(nn.Module):
     def __init__(self, dim, ffdim, nheads=4, mask_inter_choices=False) -> None:
@@ -364,56 +387,82 @@ def save_df(df, filepath):
         os.remove(filepath_copy)
     shutil.copy(filepath, filepath_copy)
 
-def main(model = None, params : dict = None):
-    assert (model is None) == (params is None)
-    if params is None:
-        from sts_ml.params import params
-
+def load_datasets(params):
     # dataset = json.load(open("./november_dataset.data", "r"))
     data = json.load(open(params["train"]["dataset"], "r"))
     if "dataset" in data:
         data_tokens = data["items"]
         full_dataset = data["dataset"]
     else: # backward compat
-        data_tokens = None
+        data_tokens = CARD_TOKENS
         full_dataset = data
+    
+    if PAD_TOKEN not in data_tokens:
+        data_tokens = [PAD_TOKEN] + data_tokens
 
-    model = Model(params, tokens=data_tokens)
-    assert set(model.tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(model.tokens), set(data_tokens) | set([PAD_TOKEN]))
-    model.train()
+    assert set(data_tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(data_tokens), set(data_tokens) | set([PAD_TOKEN]))
 
     split = params["train"]["split"]
+    do_relics = params["model"].get("input_relics", False)
     train_val_split = int(split * len(full_dataset))
 
-    train_dataset = DeckAndRewardDataset(
+    train_dataset = DeckDataset(
         samples=full_dataset[:train_val_split],
-        tokens=model.tokens,
+        tokens=data_tokens,
+        do_relics=do_relics,
     )
-    val_dataset = DeckAndRewardDataset(
+    val_dataset = DeckDataset(
         samples=full_dataset[train_val_split:],
-        tokens=model.tokens,
+        tokens=data_tokens,
+        do_relics=do_relics,
     )
+    print(f"Train ({train_val_split}) / validation ({len(full_dataset) - train_val_split}) ratio = {split}")
+
+    return data_tokens, train_dataset, val_dataset
+
+def load_dataloaders(params):
+
+    data_tokens, train_dataset, val_dataset = load_datasets(params)
 
     batch_size = params["train"]["batch_size"]
+    device = get_available_device()
     train_dataloader = iter(DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        collate_fn=DeckAndRewardDataset.collate_fn,
+        collate_fn=DeckDataset.collate_fn,
         pin_memory=True,
-        pin_memory_device=model.device,
+        pin_memory_device=device,
     ))
     val_dataloader = iter(DataLoader(
         dataset=val_dataset,
         batch_size=batch_size,
-        collate_fn=DeckAndRewardDataset.collate_fn,
+        collate_fn=DeckDataset.collate_fn,
         pin_memory=True,
-        pin_memory_device=model.device,
+        pin_memory_device=device,
     ))
 
-    print(f"Train ({train_val_split}) / validation ({len(full_dataset) - train_val_split}) ratio = {split}")
+    return data_tokens, train_dataloader, val_dataloader
+
+def get_available_device():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return device
+
+def train(params : dict = None, state_dict: dict = None):
+    if params is None:
+        from sts_ml.params import params
+
+    data_tokens, train_dataloader, val_dataloader = load_dataloaders(params)
+
+    model = Model(params, tokens=data_tokens)
+    if state_dict is not None:
+        model.load_state_dict(state_dict)
+    model.train()
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    exp_dir = os.path.join(".", TRAINING_DIR, f"{timestamp}_blocks{params['model']['blocks']}-{params['model']['dim']}_split{params['train']['split']}")
+    exp_name = f"{timestamp}_blocks{params['model']['blocks']}x{params['model']['dim']}_split{params['train']['split']}"
+    if params["model"].get("input_relics", False):
+        exp_name += "_relics"
+    exp_dir = os.path.join(".", TRAINING_DIR, exp_name)
     os.makedirs(exp_dir)
     json.dump(params, open(os.path.join(exp_dir, PARAMS_FILENAME), "w"), indent=4)
     json.dump(model.tokens, open(os.path.join(exp_dir, TOKENS_FILENAME), "w"), indent=4)
@@ -426,34 +475,24 @@ def main(model = None, params : dict = None):
     while epoch < n_epochs:
         model.train()
 
-        cross_ent_loss, top_inf_acc, top_true_acc = model.learn(next(train_dataloader))
+        losses = model.learn(next(train_dataloader))
+        losses = {f"training_{key}": value.item() for key, value in losses.items()}
         
-        cross_ent_loss = cross_ent_loss.item()
-        top_inf_acc = top_inf_acc.item()
-        top_true_acc = top_true_acc.item()
         metrics_row = {
             "epoch": epoch,
-            "training_loss": cross_ent_loss,
-            "training_top_inf_acc": top_inf_acc,
-            "training_top_true_acc": top_true_acc,
         }
+        metrics_row.update(losses)
 
         if epoch == next_epock_save_idx:
             model.eval()
-            logits, cross_ent_loss, top_inf_acc, top_true_acc = model.predict_batch(next(val_dataloader))
-            cross_ent_loss = cross_ent_loss.item()
-            top_inf_acc = top_inf_acc.item()
-            top_true_acc = top_true_acc.item()
-            metrics_row.update({
-                "val_loss": cross_ent_loss,
-                "val_top_inf_acc": top_inf_acc,
-                "val_top_true_acc": top_true_acc,
-            })
+            logits, losses = model.predict_batch(next(val_dataloader))
+            losses = {f"val_{key}": value.item() for key, value in losses.items()}
+            metrics_row.update(losses)
 
             next_epock_save_idx = next(ckpt_idxes)
             torch.save(model.state_dict(), os.path.join(exp_dir, f"{epoch}.ckpt"))
 
-        print(epoch, metrics_row)
+        print(metrics_row)
         row_df = pd.DataFrame(metrics_row, index=[0])
         metrics_df = pd.concat([metrics_df, row_df], ignore_index=True)
         save_df(metrics_df, metrics_filepath)
@@ -465,27 +504,11 @@ def main(model = None, params : dict = None):
 
     model.eval()
     
-    # idx = 0
-    # b = 1
-    # while 1:
-    #     if b:
-    #         idx = (idx + 1001) % len(train_dataset)
-    #         model.predict(train_dataset[idx])
-    #     else:
-    #         idx = (idx + 1001) % len(val_dataset)
-    #         model.predict(val_dataset[idx])
-
-def pursue_training(training_dirname):
-    training_dir = os.path.join(TRAINING_DIR, training_dirname)
-    params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
-    tokens = json.load(open(os.path.join(training_dir, TOKENS_FILENAME), "r"))
-    model = Model(params=params, tokens=tokens)
-
-    ckpt = 561
-    model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
-
-    main(model, params)
+def pursue_training(training_dirname, ckpt):
+    params = json.load(open(os.path.join(training_dirname, PARAMS_FILENAME), "r"))
+    state_dict = torch.load(os.path.join(training_dirname, f"{ckpt}.ckpt"))
+    train(params, state_dict=state_dict)
 
 if __name__ == "__main__":
-    main()
+    train()
     # pursue_training()

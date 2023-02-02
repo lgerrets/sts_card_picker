@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 import subprocess
 from glob import glob
@@ -1206,19 +1207,13 @@ def test_reconstruct_easy():
     success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
     print(success, no_warning, delta_to_master)
 
-def main(
+def create_dataset(
+    source_json_path,
     debug_start_idx = None,
     debug_end_idx = None,
 ):
     draft_dataset = []
-    # json_path = "./2019-05-31-00-53#1028.json"
-    # json_path = "./november/november.json"
-    # json_path = "./november/50000.json"
-    # json_path = "./november/1000.json"
-    # json_path = "./november/50000_win_a20_ic.json"
-    # json_path = "./november/november_win_a20_ic.json"
-    json_path = "./SlayTheData_win_a20_ic_21400.json"
-    datas = json.load(open(json_path, "r"))
+    datas = json.load(open(source_json_path, "r"))
 
     datas = [data for data in datas if filter_run(data["event"])]
 
@@ -1258,7 +1253,8 @@ def main(
         return
 
     git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
-    filepath = f"./SlayTheData_win_a20_ic_21400_{git_hash}_{computed_run}.data"
+    json_basename = ".".join(os.path.basename(source_json_path).split(".")[:-1])
+    filepath = f"./{json_basename}_{git_hash}_{len(draft_dataset)}.data"
     items = ALL_CARDS_FORMATTED + ALL_RELICS_FORMATTED
     data = {
         "dataset": draft_dataset,
@@ -1268,6 +1264,9 @@ def main(
     print(f"Dumped dataset of {len(draft_dataset)} samples and {len(items)} tokens into {filepath}")
 
 def compile_datas():
+    """
+    From .json batches of runs in ./SlayTheData, filter out by character class / wins / ascension level...
+    """
     glob_expr = "./SlayTheData/*"
     compiled_datas = []
     last_print_log_10 = 0
@@ -1283,10 +1282,11 @@ def compile_datas():
             print(f"Compiled {len(compiled_datas)} runs")
             last_print_log_10 += 1
     print(f"Compiled {len(compiled_datas)} runs")
-    json.dump(compiled_datas, open("SlayTheData/SlayTheData_win_a20_ic.json", "w"))
+    json.dump(compiled_datas, open("SlayTheData_wins_ic.json", "w"))
 
 if __name__ == "__main__":
-    main(
+    create_dataset(
+        source_json_path = "./SlayTheData_win_a10+_ic_64298.json",
         debug_start_idx = None,
         debug_end_idx = None,
     )

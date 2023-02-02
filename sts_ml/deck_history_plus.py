@@ -4,6 +4,8 @@ Deprecated script
 For .run files that come from mod Run History Plus
 """
 
+print("Deprecated")
+
 import json
 
 from sts_ml.deck_history import add_card, upgrade_card, remove_card, card_name_in_deck, format_string, card_to_name, ALL_CARDS_FORMATTED
