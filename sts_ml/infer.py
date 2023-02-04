@@ -63,9 +63,10 @@ def plot_training_metrics(training_dirname):
     plt.figure(figsize=(20,15))
 
     df = pd.read_csv(f"trainings/{training_dirname}/metrics.csv")
-    epochs = df.epoch
+    epochs = list(df.epoch)
 
     plt.grid()
+    plt.xlim(epochs[0], epochs[-1])
 
     def plot_holed_values(epochs, values, linestyle, color):
         xs = [x for x,val in zip(epochs, values) if not math.isnan(val)]
@@ -80,7 +81,9 @@ def plot_training_metrics(training_dirname):
     ]
     loss_name_to_color_theme = {}
 
+    nonna_df = df
     for key in df.columns:
+        nonna_df = nonna_df[nonna_df[key].notna()]
         
         loss_name = None
         if key.startswith("training"):
@@ -97,8 +100,11 @@ def plot_training_metrics(training_dirname):
         elif key.startswith("val"):
             plot_holed_values(epochs, list(df[key]), linestyle='dashed', color=theme[1])
     plt.legend()
+    plt.show()
 
-    return df.head(len(df))
+    print("Note: metrics are on a 'lower is better basis' so accuracy metrics are actually '1 - x'")
+
+    return nonna_df.head(len(nonna_df))
 
 
 if __name__ == "__main__":

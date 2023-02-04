@@ -3,7 +3,7 @@ params = {
     "train": {
         "lr": 1e-4,
         "split": 0.8,
-        "dataset": "./SlayTheData_win_a20_ic_21400_837d844_21399.data",
+        "dataset": "./SlayTheData_win_a10+_ic_64298_3e66426_1290352.data",
         "batch_size": 256,
     },
     "model": {

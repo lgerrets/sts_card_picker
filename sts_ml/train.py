@@ -9,6 +9,8 @@ import numpy as np
 from datetime import datetime
 import matplotlib.pyplot as plt
 import sys
+import seaborn as sns
+cm = sns.light_palette("green", as_cmap=True)
 
 import torch, torch.nn as nn
 from torch.distributions import Categorical
@@ -59,7 +61,8 @@ def torch_to_numpy(tensor):
 class DeckDataset(IterableDataset):
     PAD_INDEX = 0
 
-    def __init__(self, samples: list, tokens: list, do_relics: bool):
+    def __init__(self, samples: list = None, tokens: list = None, do_relics: bool = False):
+        self.is_empty = tokens is None
         self.samples = samples
         self.tokens = tokens
         self.do_relics = do_relics
@@ -72,6 +75,7 @@ class DeckDataset(IterableDataset):
         return index
     
     def generator(self):
+        assert not self.is_empty
         while 1:
             sample = random.choice(self.samples)
             ret = self.preprocess(sample)
@@ -98,10 +102,12 @@ class DeckDataset(IterableDataset):
         return ret
     
     def sample_unpreprocessed(self):
+        assert not self.is_empty
         sample = random.choice(self.samples)
         return sample
 
     def __iter__(self):
+        assert not self.is_empty
         return self.generator()
 
     @staticmethod
@@ -134,6 +140,7 @@ class Model(nn.Module):
         params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
         tokens = json.load(open(os.path.join(training_dir, TOKENS_FILENAME), "r"))
         model = Model(params=params, tokens=tokens)
+        model.dataset = DeckDataset(samples=None, tokens=tokens, do_relics=model.input_relics)
         if ckpt is not None:
             model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
         return model
@@ -142,6 +149,7 @@ class Model(nn.Module):
         super().__init__()
         
         self.params = params
+        self.input_relics = params["model"].get("input_relics", False)
         self.dim = dim = params["model"]["dim"]
         if tokens is None:
             if params["model"].get("input_relics", False):
@@ -172,6 +180,8 @@ class Model(nn.Module):
         self.to(device)
 
         self.opt = torch.optim.Adam(self.parameters(), lr=params["train"]["lr"])
+
+        self.just_predicted_one = False
     
     def token_to_index(self, token : str):
         name = card_to_name(token)
@@ -219,6 +229,8 @@ class Model(nn.Module):
         """
         samples -> logits, metrics
         """
+        self.just_predicted_one = False
+
         bs = batch["token_idxes"].shape[0]
         logits = self.forward(batch)
         cross_ent_loss = 0.
@@ -265,6 +277,8 @@ class Model(nn.Module):
         return logits, losses
     
     def learn(self, batch):
+        self.just_predicted_one = False
+
         self.opt.zero_grad()
         logits, losses = self.predict_batch(batch)
         cross_ent_loss = losses["cross_ent_loss"]
@@ -287,6 +301,9 @@ class Model(nn.Module):
     def predict_one(self, sample : dict):
         """
         batch of 1 sample -> print df and metrics
+
+        Usage:
+        >>> sample = {"relics": ["deadbranch"], "deck": ["strike_r", "ascendersbane"], "cards_picked": ["armaments+1"], "cards_skipped": ["impervious", "immmolate"]}
         """
         batch = self.preprocess_one(sample)
         sample_idx = 0
@@ -317,6 +334,40 @@ class Model(nn.Module):
         print(df)
 
         print(losses)
+        self.just_predicted_one = True
+        self.last_sample = copy.deepcopy(sample)
+    
+    def get_attn_weights(self, block_idx: int, head_idx: int):
+        assert self.just_predicted_one, "This function should be called right after a call to predict_one"
+        assert self.params["model"]["block_class"] == "MHALayer", "This function is intended to investigate MHALayer layer activations"
+        assert block_idx < len(self.blocks)
+        nheads = self.blocks[0].nheads
+        assert head_idx < nheads
+        print(f"Attention weights for layer #{block_idx}/{len(self.blocks)-1}, head #{head_idx}/{nheads-1}.")
+        print("This shows eg 'the output embedding (at row R) attends this much to input embeddings (at columns C)'")
+        print("NOTE: our attention weights are such that an output embedding cannot attend to padding embeddings (which we effectively do not show in the table); also output embeddings of possessed relics and cards cannot attend to input embeddings of offered cards. cf our MHALayer implementation")
+
+        sample = self.last_sample
+        sample_idx = 0
+
+        attn_weights_all = torch_to_numpy(self.blocks[block_idx].attn_weights)
+        attn_weights = attn_weights_all[sample_idx, head_idx]
+
+        tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
+        if self.input_relics:
+            tokens = sample["relics"] + tokens
+        n_tokens = len(tokens)
+        assert len(attn_weights.shape) == 2, attn_weights_all.shape
+        attn_weights = attn_weights[-n_tokens:, -n_tokens:]
+        
+        df = pd.DataFrame(attn_weights)
+        df = df.rename(columns=lambda idx: f"{idx} {tokens[idx]}", index=lambda idx: f"{idx} {tokens[idx]}")
+        
+        styler = df
+        styler = styler.style.background_gradient(cmap=cm)
+        styler = styler.format(precision=3)
+
+        return styler
 
 class MHALayer(nn.Module):
     def __init__(self, dim, ffdim, nheads=4, mask_inter_choices=False) -> None:
@@ -357,7 +408,7 @@ class MHALayer(nn.Module):
         mask = mask.reshape((batch_size*self.nheads, seq_len, seq_len))
         mask = mask.to(feat.device)
         
-        mha_feat, attn_weights = self.att(feat, feat, feat, need_weights=True, average_attn_weights=True, attn_mask=mask)
+        mha_feat, attn_weights = self.att(feat, feat, feat, need_weights=True, average_attn_weights=False, attn_mask=mask)
         self.attn_weights = attn_weights
 
         feat = feat + mha_feat
