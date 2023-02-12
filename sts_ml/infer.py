@@ -8,28 +8,15 @@ import os, os.path
 import json
 import torch
 
-from sts_ml.train import Model, pad_samples, TRAINING_DIR, PARAMS_FILENAME, TOKENS_FILENAME
-
-def count_parameters(parameters):
-    count = 0
-    for p in parameters:
-        count += np.prod(p.shape)
-    return count
+from sts_ml.train import Model, TRAINING_DIR
+from sts_ml.model import count_parameters, load_dataloaders
 
 def generate_metrics(training_dirname):
 
     training_dir = os.path.join(".", TRAINING_DIR, training_dirname)
     model = Model.load_model(training_dir, ckpt=None)
     params = model.params
-
-    # dataset = json.load(open("./SlayTheData_win_a20_ic_21400.data", "r"))
-    dataset = json.load(open(params["train"]["dataset"], "r"))
-    dataset = pad_samples(dataset)
-    
-    split = params["train"]["split"]
-    train_val_split = int(split * len(dataset))
-    train_dataset = dataset[:train_val_split]
-    val_dataset = dataset[train_val_split:]
+    data_tokens, train_dataloader, val_dataloader = load_dataloaders(params)
 
     metrics_df = pd.DataFrame()
     batch_size = int(2**8)
@@ -45,18 +32,20 @@ def generate_metrics(training_dirname):
         model.load_state_dict(state_dict)
         model.eval()
 
-        logits, losses = model.predict_samples(np.random.choice(train_dataset, size=batch_size))
-        losses = {f"training_{key}": value.item() for key, value in losses.items()}
         metrics_row = {
             "epoch": ckpt,
         }
+
+        logits, losses = model.predict_batch(next(train_dataloader))
+        losses = {f"train_{key}": value.item() for key, value in losses.items()}
         metrics_row.update(losses)
 
-        losses = model.predict_batched(np.random.choice(val_dataset, size=batch_size*8), batch_size)
+        logits, losses = model.predict_batch(next(val_dataloader))
         losses = {f"val_{key}": value.item() for key, value in losses.items()}
         metrics_row.update(losses)
 
-        metrics_df = metrics_df.append(metrics_row, ignore_index=True)
+        row_df = pd.DataFrame(metrics_row, index=[0])
+        metrics_df = pd.concat([metrics_df, row_df], ignore_index=True)
         metrics_df.to_csv(f"{training_dir}/post_generated_metrics.csv")
 
 def plot_training_metrics(training_dirname):
