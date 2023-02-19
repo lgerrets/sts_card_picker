@@ -6,27 +6,20 @@ import pandas as pd
 import numpy as np
 from typing import List
 import copy
+
 import torch, torch.nn as nn
 from torch.distributions import Categorical
 from torch.utils.data import IterableDataset, DataLoader
 from torch.utils.data._utils import collate
-import seaborn as sns
 
 from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades
+from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
 
 PARAMS_FILENAME = "params.json"
 TOKENS_FILENAME = "tokens.json"
 PAD_TOKEN = "PAD_TOKEN"
 CARD_TOKENS = [PAD_TOKEN] + list(ALL_CARDS_FORMATTED)
 CARD_AND_RELIC_TOKENS = CARD_TOKENS + list(ALL_RELICS_FORMATTED)
-
-cm = sns.light_palette("green", as_cmap=True)
-
-def count_parameters(parameters):
-    count = 0
-    for p in parameters:
-        count += np.prod(p.shape)
-    return count
 
 def pad_samples(samples : List[dict]):
     seq_max_size = 0
@@ -54,9 +47,6 @@ def unpad(sample):
     sample = copy.deepcopy(sample)
     sample["deck"] = [card for card in sample["deck"] if card != PAD_TOKEN]
     return sample
-
-def torch_to_numpy(tensor):
-    return tensor.detach().cpu().numpy()
 
 class DeckDataset(IterableDataset):
     PAD_INDEX = 0
@@ -136,6 +126,7 @@ class DeckDataset(IterableDataset):
         return ret
 
 class Model(nn.Module):
+    @staticmethod
     def load_model(training_dir : str, ckpt : int) -> "Model":
         params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
         tokens = json.load(open(os.path.join(training_dir, TOKENS_FILENAME), "r"))
@@ -144,7 +135,71 @@ class Model(nn.Module):
         if ckpt is not None:
             model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
         return model
+    
+    @staticmethod
+    def create_model():
+        from sts_ml.params import card_predictor_params
+        data_tokens, train_dataloader, val_dataloader = Model.load_dataloaders(card_predictor_params)
+        model = Model(card_predictor_params, tokens=data_tokens)
+        return model, train_dataloader, val_dataloader
 
+    @staticmethod
+    def load_datasets(params):
+        # dataset = json.load(open("./november_dataset.data", "r"))
+        data = json.load(open(params["train"]["dataset"], "r"))
+        if "dataset" in data:
+            data_tokens = data["items"]
+            full_dataset = data["dataset"]
+        else: # backward compat
+            data_tokens = CARD_TOKENS
+            full_dataset = data
+        
+        if PAD_TOKEN not in data_tokens:
+            data_tokens = [PAD_TOKEN] + data_tokens
+
+        assert set(data_tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(data_tokens), set(data_tokens) | set([PAD_TOKEN]))
+
+        split = params["train"]["split"]
+        do_relics = params["model"].get("input_relics", False)
+        train_val_split = int(split * len(full_dataset))
+
+        train_dataset = DeckDataset(
+            samples=full_dataset[:train_val_split],
+            tokens=data_tokens,
+            do_relics=do_relics,
+        )
+        val_dataset = DeckDataset(
+            samples=full_dataset[train_val_split:],
+            tokens=data_tokens,
+            do_relics=do_relics,
+        )
+        print(f"Train ({train_val_split}) / validation ({len(full_dataset) - train_val_split}) ratio = {split}")
+
+        return data_tokens, train_dataset, val_dataset
+
+    @staticmethod
+    def dataset_to_dataloader(params, dataset):
+        batch_size = params["train"]["batch_size"]
+        device = get_available_device()
+        dataloader = iter(DataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            collate_fn=DeckDataset.collate_fn,
+            pin_memory=True,
+            pin_memory_device=device,
+        ))
+        return dataloader
+
+    @staticmethod
+    def load_dataloaders(params):
+
+        data_tokens, train_dataset, val_dataset = Model.load_datasets(params)
+
+        train_dataloader = Model.dataset_to_dataloader(params, train_dataset)
+        val_dataloader = Model.dataset_to_dataloader(params, val_dataset)
+
+        return data_tokens, train_dataloader, val_dataloader
+    
     def __init__(self, params, tokens=None) -> None:
         super().__init__()
         
@@ -203,13 +258,14 @@ class Model(nn.Module):
         n_upgrades = batch["n_upgrades"]
 
         feat = self.embedding(idxes)
-        n_upgrades = torch.clip(n_upgrades, 0, 1)
-        for idx, n_choice in enumerate(cards_picked_n + cards_skipped_n):
+        n_upgrades = torch.clip(n_upgrades, 0, 1) # TODO: we lose the nb of upgrades of searing blow
+        assert isinstance(cards_picked_n, np.ndarray)
+        for idx, (n_choice, n_upgrade) in enumerate(zip(cards_picked_n + cards_skipped_n, n_upgrades)):
             # scalar #0 of embedding encodes whether this is a choice token
             feat[idx,:-n_choice,0] = 0
             feat[idx,n_choice:,0] = 1
             # scalar #1 of embedding encodes whether this is an upgraded card
-            feat[idx,:,1] = n_upgrades[idx]
+            feat[idx,:,1] = n_upgrade
         
         kwargs = {}
         if self.params["model"]["block_class"] == "MHALayer":
@@ -418,71 +474,27 @@ class MHALayer(nn.Module):
         feat = self.ln2(feat)
         return feat
 
-def save_df(df, filepath):
-    df.to_csv(filepath)
-    words : list = filepath.split(".")
-    words.insert(len(words)-1, "copy")
-    filepath_copy = ".".join(words)
-    if os.path.exists(filepath_copy):
-        os.remove(filepath_copy)
-    shutil.copy(filepath, filepath_copy)
-
-def load_datasets(params):
-    # dataset = json.load(open("./november_dataset.data", "r"))
-    data = json.load(open(params["train"]["dataset"], "r"))
-    if "dataset" in data:
-        data_tokens = data["items"]
-        full_dataset = data["dataset"]
-    else: # backward compat
-        data_tokens = CARD_TOKENS
-        full_dataset = data
+class PoolTimeDimension(nn.Module):
+    def __init__(self, dim, hidden_dim=16) -> None:
+        super().__init__()
+        self.dim = dim
+        self.hidden_dim = hidden_dim
+        self.query_nn = nn.Linear(dim, self.hidden_dim)
+        self.key_nn = nn.Linear(dim, self.hidden_dim)
+        self.output_nn = nn.Linear(self.hidden_dim*self.hidden_dim, dim)
     
-    if PAD_TOKEN not in data_tokens:
-        data_tokens = [PAD_TOKEN] + data_tokens
+    def forward(self, feat):
+        bs, seqlen, dim = feat.shape
+        assert self.dim == dim
 
-    assert set(data_tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(data_tokens), set(data_tokens) | set([PAD_TOKEN]))
+        query = self.query_nn(feat) # bs, seqlen, hidden_dim
+        key = self.key_nn(feat) # bs, seqlen, hidden_dim
 
-    split = params["train"]["split"]
-    do_relics = params["model"].get("input_relics", False)
-    train_val_split = int(split * len(full_dataset))
+        query = torch.transpose(query, 1, 2) # -> bs, hidden_dim, seqlen
+        dots = torch.matmul(query, key) # -> bs, hidden_dim, hidden_dim
+        assert dots.shape == (bs, self.hidden_dim, self.hidden_dim), (dots.shape, bs, self.hidden_dim)
 
-    train_dataset = DeckDataset(
-        samples=full_dataset[:train_val_split],
-        tokens=data_tokens,
-        do_relics=do_relics,
-    )
-    val_dataset = DeckDataset(
-        samples=full_dataset[train_val_split:],
-        tokens=data_tokens,
-        do_relics=do_relics,
-    )
-    print(f"Train ({train_val_split}) / validation ({len(full_dataset) - train_val_split}) ratio = {split}")
+        dots = dots.reshape(bs, self.hidden_dim*self.hidden_dim)
+        out = self.output_nn(dots) # -> bs, dim
 
-    return data_tokens, train_dataset, val_dataset
-
-def load_dataloaders(params):
-
-    data_tokens, train_dataset, val_dataset = load_datasets(params)
-
-    batch_size = params["train"]["batch_size"]
-    device = get_available_device()
-    train_dataloader = iter(DataLoader(
-        dataset=train_dataset,
-        batch_size=batch_size,
-        collate_fn=DeckDataset.collate_fn,
-        pin_memory=True,
-        pin_memory_device=device,
-    ))
-    val_dataloader = iter(DataLoader(
-        dataset=val_dataset,
-        batch_size=batch_size,
-        collate_fn=DeckDataset.collate_fn,
-        pin_memory=True,
-        pin_memory_device=device,
-    ))
-
-    return data_tokens, train_dataloader, val_dataloader
-
-def get_available_device():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    return device
+        return out

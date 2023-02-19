@@ -1,5 +1,7 @@
 ## Priority / wip
 
+- LR schedule: warmup...
+- Factorize duplicated code (model.py and win_model.py)
 - Shuffle the runs in create_dataset, because we currently indirectly train/test split the dataset on a chronological basis
 - Do proper epochs ie traverse the whole, shuffled, dataset
 - Did not check that state of relics is well reconstructed in deck_history.py

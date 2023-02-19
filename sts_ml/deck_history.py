@@ -42,6 +42,7 @@ BASE_GAME_POWERS = ["Inflame", "Brutality", "Juggernaut", "Berserk", "Metalliciz
 BASE_GAME_CURSES = ["Regret", "Writhe", "AscendersBane", "Decay", "Necronomicurse", "Pain", "Parasite", "Doubt", "Injury", "Clumsy", "CurseOfTheBell", "Normality", "Pride", "Shame"]
 
 BASE_GAME_ENEMIES = ["Blue Slaver", "Cultist", "Jaw Worm", "Looter", "2 Louse", "Small Slimes", "Gremlin Gang", "Red Slaver", "Large Slime", "Exordium Thugs", "Exordium Wildlife", "3 Louse", "2 Fungi Beasts", "Lots of Slimes", "Gremlin Nob", "Lagavulin", "3 Sentries", "Lagavulin Event", "The Mushroom Lair", "The Guardian", "Hexaghost", "Slime Boss", "2 Thieves", "3 Byrds", "Chosen", "Shell Parasite", "Spheric Guardian", "Cultist and Chosen", "3 Cultists", "4 Byrds", "Chosen and Byrds", "Sentry and Sphere", "Snake Plant", "Snecko", "Centurion and Healer", "Shelled Parasite and Fungi", "Book of Stabbing", "Gremlin Leader", "Slavers", "Masked Bandits", "Colosseum Slavers", "Colosseum Nobs", "Automaton", "Champ", "Collector", "3 Darklings", "3 Shapes", "Orb Walker", "Transient", "Reptomancer", "Spire Growth", "Maw", "4 Shapes", "Sphere and 2 Shapes", "Jaw Worm Horde", "Snecko and Mystics", "Writhing Mass", "2 Orb Walkers", "Nemesis", "Giant Head", "Mysterious Sphere", "Mind Bloom Boss Battle", "Time Eater", "Awakened One", "Donu and Deca", "The Heart", "Shield and Spear", "The Eyes", "Apologetic Slime", "Flame Bruiser 1 Orb", "Flame Bruiser 2 Orb", "Slaver and Parasite", "Snecko and Mystics"]
+BOSS_ENEMIES = ["The Guardian", "Hexaghost", "Slime Boss", "Automaton", "Champ", "Collector", "Time Eater", "Awakened One", "Donu and Deca", "The Heart"]
 
 ALL_CARDS = BASE_GAME_ATTACKS + BASE_GAME_SKILLS + BASE_GAME_POWERS + BASE_GAME_CURSES + OLDER_CARDS
 
@@ -317,6 +318,8 @@ def is_bad_data(data : dict):
     if key not in data or data[key] is True:
         return True
 
+    if data["gold_per_floor"][0] >= 500: return True
+
     # Endless mode
     key = 'is_endless'
     if key not in data or data[key] is True:
@@ -363,6 +366,7 @@ class FloorDelta:
         node : str = "",
         chest_opened : bool = False,
         maybe_got_parasite : bool = False,
+        act_delta : int = 0,
     ):
         self.floor = floor
         self.cards_added = [format_string(_) for _ in cards_added]
@@ -379,6 +383,7 @@ class FloorDelta:
         self.node = node
         self.chest_opened = chest_opened
         self.maybe_got_parasite = maybe_got_parasite
+        self.act_delta = act_delta
 
         for card in self.cards_added + self.cards_removed + self.cards_upgraded + self.cards_transformed + self.cards_skipped:
             if not isinstance(card, UndeterminedCard):
@@ -455,8 +460,10 @@ class FloorState:
         relics : List[str] = None,
         gold : int = 0,
         hp : int = 0,
+        act: int = 0,
     ):
         self.floor = floor
+        self.act = act
         self.cards = [format_string(_) for _ in cards] if cards is not None else []
         self.relics = [format_string(_) for _ in relics] if relics is not None else []
         self.gold = gold
@@ -589,6 +596,7 @@ class History:
         This is where we should be reading from state.modifiers (eg omamori) and trigger on-obtained relics (eg pandora's box)
         """
         floor_state.floor += 1
+        floor_state.act += floor_delta.act_delta
 
         if correcting_floor_delta is not None:
             if "parasite" in correcting_floor_delta.cards_added:
@@ -828,7 +836,7 @@ def filter_run(data : dict):
 
     return True
 
-def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
+def rebuild_deck_from_vanilla_run(data : dict):
     if data["character_chosen"] == "IRONCLAD":
         initial_deck = ["Defend_R"]*4 + ["Strike_R"]*5 + ["Bash", "AscendersBane"]
         class_color = Color.RED
@@ -841,9 +849,12 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
 
     history = History(initial_floor_state)
 
+    floor_samples = []
     floor = -1
     act = 1
-    for node in ["NEOW"] + data["path_per_floor"]:
+    entered_secret_portal = False
+    path_per_floor = ["NEOW"] + copy.deepcopy(data["path_per_floor"])
+    for node in path_per_floor:
         floor += 1
         floor_delta_dict = {}
 
@@ -863,22 +874,29 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                 floor_delta_dict["relics_added"] = floor_delta_dict.get("relics_added", []) + [relic]
                 if relic == "necronomicon": # NOTE: necronomicon
                     floor_delta_dict["cards_added"] = floor_delta_dict.get("cards_added", []) + ["necronomicurse"]
-
+        
         if (node == "M") or (node == "E") or (node == "B"):
+            found_combat = False
+            damage_taken_data = {}
+            for damage_taken_data in data["damage_taken"]:
+                if damage_taken_data["floor"] == floor:
+                    found_combat = True
+                    break
+
             if node == "B":
                 if act <= 2:
                     if "picked" in data["boss_relics"][act-1]:
                         floor_delta_dict["relics_added"] = [data["boss_relics"][act-1]["picked"]]
-                act += 1
+
             elif node == "M":
-                found = False
-                damage_taken_data = {}
-                for damage_taken_data in data["damage_taken"]:
-                    if damage_taken_data["floor"] == floor:
-                        found = True
-                        break
-                if (act == 3) and found and (damage_taken_data["enemies"] == "Writhing Mass"):
+                if (act == 3) and found_combat and (damage_taken_data["enemies"] == "Writhing Mass"):
                     floor_delta_dict["maybe_got_parasite"] = True
+        
+        elif node == "null":
+            if floor + 1 != len(path_per_floor):
+                floor_delta_dict["act_delta"] = 1
+                act += 1
+                assert act <= 4
 
         elif node == "NEOW":
             neow_bonus = data.get("neow_bonus", "")
@@ -945,6 +963,8 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
                         for card in event_choice["relics_obtained"]:
                             floor_delta_dict["relics_added"] = floor_delta_dict.get("relics_added", []) + [card]
                     floor_delta_dict["event_name"] = event_choice["event_name"]
+                    if (event_choice["event_name"] == "SecretPortal") and (event_choice["player_choice"] == "Took Portal"):
+                        entered_secret_portal = True
                     floor_delta_dict["player_choice"] = event_choice["player_choice"]
                     break
         elif node == "R":
@@ -979,24 +999,28 @@ def rebuild_deck_from_vanilla_run(data : dict, run_rows : list):
 
     master_deck = data["master_deck"]
     delta_to_master = history.wrap_up(master_deck)
+    act_reached = act
 
     for floor_state, floor_delta in zip(history.floor_states, history.floor_deltas):
         if len(floor_delta.cards_skipped):
-            data_row = {
+            floor_sample = {
                 "relics": [relic for relic in floor_state.relics if (relic != DEFINITELY_SOMETHING) and (relic in ALL_RELICS_FORMATTED)],
                 "deck": [card for card in floor_state.cards if not isinstance(card, UndeterminedCard)],
                 "cards_picked": [card for card in floor_delta.cards_added if not isinstance(card, UndeterminedCard)],
                 "cards_skipped": [card for card in floor_delta.cards_skipped if not isinstance(card, UndeterminedCard)],
+                "victory": data["victory"],
+                "floor": floor_state.floor,
+                "act": floor_state.act,
+                "floor_reached": data["floor_reached"],
+                "act_reached": act_reached,
             }
-            run_rows.append(data_row)
+            floor_samples.append(floor_sample)
 
     error = (len(delta_to_master.cards_added) > 0) or (len(delta_to_master.cards_removed_or_transformed) > 0) or (len(delta_to_master.cards_upgraded) > 0)
     warning = history.last_resolved_floor_delta_idx < len(data["path_per_floor"])
-    return not error, not warning, delta_to_master
+    return floor_samples, not error, not warning, delta_to_master
 
 def test_reconstruct():
-    run_rows = []
-
     relics_obtained = [
         {
             "key": "Whetstone", # upgrade 2 'Strike'
@@ -1075,7 +1099,7 @@ def test_reconstruct():
     }
 
     History.verbose = 1
-    success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+    floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
     print(success, no_warning, delta_to_master)
 
     print("Oracle states")
@@ -1084,8 +1108,6 @@ def test_reconstruct():
 
 
 def test_reconstruct2():
-    run_rows = []
-
     relics_obtained = [
         {
             "key": "Omamori",
@@ -1149,7 +1171,7 @@ def test_reconstruct2():
     }
 
     History.verbose = 1
-    success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+    floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
     print(success, no_warning, delta_to_master)
 
     print("Oracle states")
@@ -1157,8 +1179,6 @@ def test_reconstruct2():
         print(floor, sorted(master_deck))
 
 def test_reconstruct_easy():
-    run_rows = []
-
     relics_obtained = [
         {
             "key": "Whetstone", # upgrade 2 'Strike'
@@ -1204,7 +1224,7 @@ def test_reconstruct_easy():
     }
 
     History.verbose = 1
-    success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+    floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
     print(success, no_warning, delta_to_master)
 
 def create_dataset(
@@ -1228,11 +1248,10 @@ def create_dataset(
             break
         assert set(data.keys()) == {'event'}
         data = data["event"]
-        run_rows = []
         if is_debugging:
             json.dump(data, open("./example_vanilla.run", "w"), indent=4)
         try:
-            success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data, run_rows)
+            floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
         except UnknownCard as e:
             print(f"{run_idx}: Unknown card '{e.card}'")
             if e.card.lower().startswith("sk?"): # one or several runs in the dataset have this issue, maybe a localization issue from STS?
@@ -1241,16 +1260,13 @@ def create_dataset(
         diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
         total_diff_l1 += diff
         if diff < 3:
-            draft_dataset += run_rows
+            draft_dataset += floor_samples
         if diff or success:
             if diff >= 1:
                 print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
             computed_run += 1
             total_diff_l0 += int(diff > 0)
     print(f"Diff score over {computed_run} runs = {total_diff_l1}, {total_diff_l0} could not be reconstructed.")
-
-    if is_debugging:
-        return
 
     git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
     json_basename = ".".join(os.path.basename(source_json_path).split(".")[:-1])

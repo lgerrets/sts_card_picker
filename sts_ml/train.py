@@ -1,3 +1,4 @@
+from typing import Callable, Union
 import torch
 import shutil
 import os
@@ -10,7 +11,9 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from sts_ml.model import PAD_TOKEN, load_datasets, load_dataloaders, Model, PARAMS_FILENAME, TOKENS_FILENAME, save_df
+from sts_ml.model import PAD_TOKEN, Model, PARAMS_FILENAME, TOKENS_FILENAME
+from sts_ml.win_model import WinModel
+from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
 
 TRAINING_DIR = "trainings"
 
@@ -32,19 +35,17 @@ def gen_ckpt_idxes(asymptot):
         idx += delta
         yield idx
 
-def train(params : dict = None, state_dict: dict = None):
-    if params is None:
-        from sts_ml.params import params
+def train(model_cls: Union[Model, WinModel], state_dict: dict = None):
+    model, train_dataloader, val_dataloader = model_cls.create_model()
 
-    data_tokens, train_dataloader, val_dataloader = load_dataloaders(params)
-
-    model = Model(params, tokens=data_tokens)
     if state_dict is not None:
-        model.load_state_dict(state_dict)
+        raise NotImplementedError("TODO")
+        model_cls.load_state_dict(state_dict)
+    params = model.params
     model.train()
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    exp_name = f"{timestamp}_blocks{params['model']['blocks']}x{params['model']['dim']}_split{params['train']['split']}"
+    exp_name = f"{timestamp}_{model.__class__.__name__}_blocks{params['model']['blocks']}x{params['model']['dim']}_split{params['train']['split']}"
     if params["model"].get("input_relics", False):
         exp_name += "_relics"
     exp_dir = os.path.join(".", TRAINING_DIR, exp_name)
@@ -95,5 +96,6 @@ def pursue_training(training_dirname, ckpt):
     train(params, state_dict=state_dict)
 
 if __name__ == "__main__":
-    train()
+    # train(model_cls=Model)
+    train(model_cls=WinModel)
     # pursue_training()
