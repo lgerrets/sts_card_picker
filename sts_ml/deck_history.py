@@ -318,7 +318,7 @@ def is_bad_data(data : dict):
     if key not in data or data[key] is True:
         return True
 
-    if data["gold_per_floor"][0] >= 500: return True
+    if len(data["gold_per_floor"]) and data["gold_per_floor"][0] >= 500: return True
 
     # Endless mode
     key = 'is_endless'
@@ -345,7 +345,7 @@ def is_bad_data(data : dict):
     key = 'player_experience'
     if key not in data or data[key] < 100:
         return True
-    
+
     return False
 
 class FloorDelta:
@@ -830,7 +830,7 @@ def filter_run(data : dict):
     if not data["is_ascension_mode"]: return False
     if data["character_chosen"] != "IRONCLAD": return False
     if data["ascension_level"] < 10: return False
-    if not data["victory"]: return False
+    # if not data["victory"]: return False
 
     if is_bad_data(data): return False
 
@@ -1283,30 +1283,56 @@ def compile_datas():
     """
     From .json batches of runs in ./SlayTheData, filter out by character class / wins / ascension level...
     """
+    batch_idx = 0
+    def dump_batch(compiled_datas):
+        write_path = f"SlayTheData_a10+_ic_{batch_idx}_{len(compiled_datas)}.json"
+        json.dump(compiled_datas, open(write_path, "w"))
+        print(f"Dumped {write_path}")
+        compiled_datas.clear()
+
     glob_expr = "./SlayTheData/*"
     compiled_datas = []
-    last_print_log_10 = 0
+    next_print_log_10 = 0
+    total_runs = 0
     for filepath in glob(glob_expr):
         try:
             datas = json.load(open(filepath, "r"))
-        except:
+        except Exception as e:
+            print(repr(e))
             print(f"Invalid file {filepath}")
             continue
-        datas = [data for data in datas if filter_run(data["event"])]
-        compiled_datas += datas
-        if len(compiled_datas) > 10**last_print_log_10:
-            print(f"Compiled {len(compiled_datas)} runs")
-            last_print_log_10 += 1
-    print(f"Compiled {len(compiled_datas)} runs")
-    json.dump(compiled_datas, open("SlayTheData_wins_ic.json", "w"))
+        compiled_data_sub = []
+        for data in datas:
+            try:
+                if filter_run(data["event"]):
+                    compiled_data_sub.append(data)
+            except Exception as e:
+                path = "./invalid.run"
+                print(repr(e))
+                print(f"Invalid run, dumped into {path}")
+                json.dump(data, open(path, "w"), indent=4)
+        compiled_datas += compiled_data_sub
+        total_runs += len(compiled_data_sub)
+        if total_runs > 10**next_print_log_10:
+            print(f"Compiled {total_runs} runs")
+            next_print_log_10 = int(np.log10(total_runs)) + 1
+        
+        if len(compiled_datas) > 100000:
+            dump_batch(compiled_datas)
+            batch_idx += 1
+
+    if len(compiled_datas) > 0:
+        dump_batch(compiled_datas)
+
+    print(f"Done. Compiled {total_runs} runs")
 
 if __name__ == "__main__":
-    create_dataset(
-        source_json_path = "./SlayTheData_win_a10+_ic_64298.json",
-        debug_start_idx = None,
-        debug_end_idx = None,
-    )
-    # compile_datas()
+    # create_dataset(
+    #     source_json_path = "./SlayTheData_win_a10+_ic_64298.json",
+    #     debug_start_idx = None,
+    #     debug_end_idx = None,
+    # )
+    compile_datas()
     # test_reconstruct()
     # test_reconstruct2()
     # test_reconstruct_easy()
