@@ -4,7 +4,6 @@ import copy
 import json
 import os, os.path
 import random
-import seaborn as sns
 
 import torch, torch.nn as nn
 from torch.utils.data import IterableDataset, DataLoader
@@ -13,34 +12,14 @@ from torch.utils.data._utils import collate
 from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades
 from sts_ml.model import PARAMS_FILENAME, TOKENS_FILENAME, CARD_AND_RELIC_TOKENS, PAD_TOKEN, CARD_TOKENS, PoolTimeDimension, MHALayer, torch_to_numpy, numpy_to_torch
 from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
+from sts_ml.model_abc import StsDataset, ModelAbc, MHALayer
 
-cm = sns.light_palette("green", as_cmap=True)
-
-class WinDataset(IterableDataset):
-    PAD_INDEX = 0
+class WinDataset(StsDataset):
 
     def __init__(self, params: dict, samples: list = None, tokens: list = None):
-        self.is_empty = tokens is None
-        self.samples = samples
-        self.tokens = tokens
-        self.params = params
-        self.do_relics = params["model"]["input_relics"]
+        super().__init__(params, samples, tokens)
         self.gamma = params["model"]["gamma"]
-        assert tokens.index(PAD_TOKEN) == WinDataset.PAD_INDEX
-
-    def token_to_index(self, token : str):
-        name = card_to_name(token)
-        assert name in self.tokens, name
-        index = self.tokens.index(name)
-        return index
-    
-    def generator(self):
-        assert not self.is_empty
-        while 1:
-            sample = self.sample_unpreprocessed()
-            ret = self.preprocess(sample)
-            yield ret
-    
+        
     def preprocess(self, sample: dict):
         """
         NOTE: typical wins have floor_reached == 51 (56 if heart); A20 is 52 (57 if heart)
@@ -94,17 +73,12 @@ class WinDataset(IterableDataset):
         return ret
     
     def sample_unpreprocessed(self):
-        assert not self.is_empty
-        sample = random.choice(self.samples)
+        sample = super().sample_unpreprocessed()
         sample["deck"] += sample["cards_picked"]
         return sample
 
-    def __iter__(self):
-        assert not self.is_empty
-        return self.generator()
-
-    @staticmethod
-    def collate_fn(samples):
+    @classmethod
+    def collate_fn(cls, samples):
         max_seq_len = -1
         for sample in samples:
             seq_len = sample["items_n"]
@@ -134,95 +108,12 @@ class WinDataset(IterableDataset):
 
         return ret
 
-class WinModel(nn.Module):
-    def load_model(training_dir : str, ckpt : int) -> "Model":
-        params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
-        tokens = json.load(open(os.path.join(training_dir, TOKENS_FILENAME), "r"))
-        model = WinModel(params=params, tokens=tokens)
-        model.dataset = WinDataset(params=params, samples=None, tokens=tokens)
-        if ckpt is not None:
-            model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
-        return model
-
-    @staticmethod
-    def create_model():
-        from sts_ml.params import win_predictor_params
-        data_tokens, train_dataloader, val_dataloader = WinModel.load_dataloaders(win_predictor_params)
-        model = WinModel(win_predictor_params, tokens=data_tokens)
-        return model, train_dataloader, val_dataloader
-
-    @staticmethod
-    def load_datasets(params):
-        # dataset = json.load(open("./november_dataset.data", "r"))
-        data = json.load(open(params["train"]["dataset"], "r"))
-        if "dataset" in data:
-            data_tokens = data["items"]
-            full_dataset = data["dataset"]
-        else: # backward compat
-            data_tokens = CARD_TOKENS
-            full_dataset = data
-        
-        if PAD_TOKEN not in data_tokens:
-            data_tokens = [PAD_TOKEN] + data_tokens
-
-        assert set(data_tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(data_tokens), set(data_tokens) | set([PAD_TOKEN]))
-
-        split = params["train"]["split"]
-        train_val_split = int(split * len(full_dataset))
-
-        train_dataset = WinDataset(
-            params=params,
-            samples=full_dataset[:train_val_split],
-            tokens=data_tokens,
-        )
-        val_dataset = WinDataset(
-            params=params,
-            samples=full_dataset[train_val_split:],
-            tokens=data_tokens,
-        )
-        print(f"Train ({train_val_split}) / validation ({len(full_dataset) - train_val_split}) ratio = {split}")
-
-        return data_tokens, train_dataset, val_dataset
-
-    @staticmethod
-    def dataset_to_dataloader(params, dataset):
-        batch_size = params["train"]["batch_size"]
-        device = get_available_device()
-        dataloader = iter(DataLoader(
-            dataset=dataset,
-            batch_size=batch_size,
-            collate_fn=WinDataset.collate_fn,
-            pin_memory=True,
-            pin_memory_device=device,
-        ))
-        return dataloader
-
-    @staticmethod
-    def load_dataloaders(params):
-
-        data_tokens, train_dataset, val_dataset = WinModel.load_datasets(params)
-
-        train_dataloader = WinModel.dataset_to_dataloader(params, train_dataset)
-        val_dataloader = WinModel.dataset_to_dataloader(params, val_dataset)
-
-        return data_tokens, train_dataloader, val_dataloader
+class WinModel(ModelAbc):
 
     def __init__(self, params, tokens=None) -> None:
-        super().__init__()
-        
-        self.params = params
-        self.input_relics = params["model"].get("input_relics", False)
-        self.dim = dim = params["model"]["dim"]
-        if tokens is None:
-            if params["model"].get("input_relics", False):
-                tokens = CARD_AND_RELIC_TOKENS
-                raise NotImplementedError("Wip: implement the forward pass")
-            else:
-                tokens = CARD_TOKENS
-        if PAD_TOKEN not in tokens:
-            tokens = [PAD_TOKEN] + tokens
-        self.tokens = tokens
-        self.pad_idx = tokens.index(PAD_TOKEN)
+        super().__init__(params, tokens)        
+
+        dim = self.dim
         self.embedding = nn.Embedding(len(tokens), dim)
         if params["model"]["block_class"] == "MHALayer":
             blocks = [MHALayer(
@@ -244,13 +135,6 @@ class WinModel(nn.Module):
 
         self.opt = torch.optim.Adam(self.parameters(), lr=params["train"]["lr"])
 
-        self.just_predicted_one = False
-    
-    def token_to_index(self, token : str):
-        name = card_to_name(token)
-        assert name in self.tokens, name
-        index = self.tokens.index(name)
-        return index
     
     def forward(self, batch):
         """
@@ -336,18 +220,6 @@ class WinModel(nn.Module):
         self.opt.step()
         return losses
     
-    def preprocess_one(self, sample: dict):
-        preprocessed_sample = self.dataset.preprocess(sample)
-        batch = WinDataset.collate_fn([preprocessed_sample])
-        # batch = self._to_device(batch)
-        return batch
-
-    def _to_device(self, batch: dict):
-        for key in batch:
-            if isinstance(batch[key], torch.Tensor):
-                batch[key] = batch[key].to(self.device)
-        return batch
-    
     def predict_one(self, sample : dict):
         """
         batch of 1 sample -> print df and metrics
@@ -380,34 +252,6 @@ class WinModel(nn.Module):
         self.just_predicted_one = True
         self.last_sample = copy.deepcopy(sample)
     
-    def get_attn_weights(self, block_idx: int, head_idx: int):
-        assert self.just_predicted_one, "This function should be called right after a call to predict_one"
-        assert self.params["model"]["block_class"] == "MHALayer", "This function is intended to investigate MHALayer layer activations"
-        assert block_idx < len(self.blocks)
-        nheads = self.blocks[0].nheads
-        assert head_idx < nheads
-        print(f"Attention weights for layer #{block_idx}/{len(self.blocks)-1}, head #{head_idx}/{nheads-1}.")
-        print("This shows eg 'the output embedding (at row R) attends this much to input embeddings (at columns C)'")
-        print("NOTE: our attention weights are such that an output embedding cannot attend to padding embeddings (which we effectively do not show in the table). cf our MHALayer implementation")
-
-        sample = self.last_sample
-        sample_idx = 0
-
-        attn_weights_all = torch_to_numpy(self.blocks[block_idx].attn_weights)
-        attn_weights = attn_weights_all[sample_idx, head_idx]
-
+    def sample_to_tokens(self, sample):
         tokens = sample["deck"]
-        if self.input_relics:
-            tokens = sample["relics"] + tokens
-        n_tokens = len(tokens)
-        assert len(attn_weights.shape) == 2, attn_weights_all.shape
-        attn_weights = attn_weights[-n_tokens:, -n_tokens:]
-        
-        df = pd.DataFrame(attn_weights)
-        df = df.rename(columns=lambda idx: f"{idx} {tokens[idx]}", index=lambda idx: f"{idx} {tokens[idx]}")
-        
-        styler = df
-        styler = styler.style.background_gradient(cmap=cm)
-        styler = styler.format(precision=3)
-
-        return styler
+        return tokens

@@ -1283,6 +1283,9 @@ def create_dataset(
                 if e.card.lower().startswith("sk?"): # one or several runs in the dataset have this issue, maybe a localization issue from STS?
                     continue
                 raise e
+            except Exception as e:
+                print(run_idx, ": Got exception:", repr(e))
+                continue
             diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
             total_diff_l1 += diff
             if diff < 3:
