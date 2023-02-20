@@ -45,6 +45,7 @@ BASE_GAME_ENEMIES = ["Blue Slaver", "Cultist", "Jaw Worm", "Looter", "2 Louse", 
 BOSS_ENEMIES = ["The Guardian", "Hexaghost", "Slime Boss", "Automaton", "Champ", "Collector", "Time Eater", "Awakened One", "Donu and Deca", "The Heart"]
 
 ALL_CARDS = BASE_GAME_ATTACKS + BASE_GAME_SKILLS + BASE_GAME_POWERS + BASE_GAME_CURSES + OLDER_CARDS
+PAD_TOKEN = "PAD_TOKEN"
 
 Color = Enum('Color', ['RED', 'GREEN', 'BLUE', 'PURPLE', 'COLORLESS', 'STATUS', 'CURSE'])
 Rarity = Enum('Rarity', ['STARTER', 'COMMON', 'UNCOMMON', 'RARE'])
@@ -1227,8 +1228,8 @@ def test_reconstruct_easy():
     floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
     print(success, no_warning, delta_to_master)
 
-def tokenize_dataset(dataset: dict, tokens: list):
-    for sample in dataset:
+def tokenize_dataset(databatch: list, tokens: list):
+    for sample in databatch:
         processed_keys = []
         for key in sample:
             contains_list_of_items = isinstance(sample[key], list) and len(sample[key]) and isinstance(sample[key][0], str)
@@ -1239,6 +1240,27 @@ def tokenize_dataset(dataset: dict, tokens: list):
                     splits = item.split("+")
                     name = splits[0]
                     token_idx = tokens.index(name)
+                    new_name = str(token_idx)
+                    if len(splits) > 1:
+                        n_upgrades = splits[1]
+                        new_name += f"+{n_upgrades}"
+                    new_list.append(new_name)
+                sample[key] = new_list
+                processed_keys.append(key)
+    return databatch
+
+def detokenize(databatch: list, tokens: list):
+    to_process_keys = ['relics', 'deck', 'cards_picked', 'cards_skipped']
+    for sample in databatch:
+        processed_keys = []
+        for key in sample:
+            if key in to_process_keys:
+                old_list = sample[key]
+                new_list = []
+                for item in old_list:
+                    splits = item.split("+")
+                    token_idx = int(splits[0])
+                    name = tokens[token_idx]
                     new_name = name
                     if len(splits) > 1:
                         n_upgrades = splits[1]
@@ -1246,7 +1268,7 @@ def tokenize_dataset(dataset: dict, tokens: list):
                     new_list.append(new_name)
                 sample[key] = new_list
                 processed_keys.append(key)
-    return dataset
+    return databatch
 
 def create_dataset(
     source_json_path,
@@ -1262,7 +1284,7 @@ def create_dataset(
     total_diff_l1 = 0
     computed_run = 0
     is_debugging = (debug_start_idx is not None) or (debug_end_idx is not None)
-    tokens = ALL_CARDS_FORMATTED + ALL_RELICS_FORMATTED
+    tokens = [PAD_TOKEN] + ALL_CARDS_FORMATTED + ALL_RELICS_FORMATTED
 
     for source_json_path in source_json_paths:
         datas = json.load(open(source_json_path, "r"))

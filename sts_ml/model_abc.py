@@ -14,14 +14,11 @@ from torch.distributions import Categorical
 from torch.utils.data import IterableDataset, DataLoader
 from torch.utils.data._utils import collate
 
-from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades
+from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades, PAD_TOKEN, detokenize
 from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
 
 PARAMS_FILENAME = "params.json"
 TOKENS_FILENAME = "tokens.json"
-PAD_TOKEN = "PAD_TOKEN"
-CARD_TOKENS = [PAD_TOKEN] + list(ALL_CARDS_FORMATTED)
-CARD_AND_RELIC_TOKENS = CARD_TOKENS + list(ALL_RELICS_FORMATTED)
 
 def pad_samples(samples : List[dict]):
     seq_max_size = 0
@@ -77,6 +74,7 @@ class StsDataset(IterableDataset):
     def sample_unpreprocessed(self):
         assert not self.is_empty
         sample = random.choice(self.samples)
+        sample = detokenize(sample)
         return sample
 
     def __iter__(self):
@@ -160,14 +158,7 @@ class ModelAbc(nn.Module):
         self.params = params
         self.input_relics = params["model"].get("input_relics", False)
         self.dim = dim = params["model"]["dim"]
-        if tokens is None:
-            if params["model"].get("input_relics", False):
-                tokens = CARD_AND_RELIC_TOKENS
-                raise NotImplementedError("Wip: implement the forward pass")
-            else:
-                tokens = CARD_TOKENS
-        if PAD_TOKEN not in tokens:
-            tokens = [PAD_TOKEN] + tokens
+        assert PAD_TOKEN in tokens
         self.tokens = tokens
         self.pad_idx = tokens.index(PAD_TOKEN)
         self.just_predicted_one = False
