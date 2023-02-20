@@ -885,7 +885,7 @@ def rebuild_deck_from_vanilla_run(data : dict):
 
             if node == "B":
                 if act <= 2:
-                    if "picked" in data["boss_relics"][act-1]:
+                    if (len(data["boss_relics"]) >= act) and ("picked" in data["boss_relics"][act-1]):
                         floor_delta_dict["relics_added"] = [data["boss_relics"][act-1]["picked"]]
 
             elif node == "M":
@@ -1227,57 +1227,83 @@ def test_reconstruct_easy():
     floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
     print(success, no_warning, delta_to_master)
 
+def tokenize_dataset(dataset: dict, tokens: list):
+    for sample in dataset:
+        processed_keys = []
+        for key in sample:
+            contains_list_of_items = isinstance(sample[key], list) and len(sample[key]) and isinstance(sample[key][0], str)
+            if contains_list_of_items:
+                old_list = sample[key]
+                new_list = []
+                for item in old_list:
+                    splits = item.split("+")
+                    name = splits[0]
+                    token_idx = tokens.index(name)
+                    new_name = name
+                    if len(splits) > 1:
+                        n_upgrades = splits[1]
+                        new_name += f"+{n_upgrades}"
+                    new_list.append(new_name)
+                sample[key] = new_list
+                processed_keys.append(key)
+    return dataset
+
 def create_dataset(
     source_json_path,
     debug_start_idx = None,
     debug_end_idx = None,
 ):
+    if isinstance(source_json_path, str):
+        source_json_paths = [source_json_path]
+    source_json_paths = source_json_path
+
     draft_dataset = []
-    datas = json.load(open(source_json_path, "r"))
-
-    datas = [data for data in datas if filter_run(data["event"])]
-
     total_diff_l0 = 0
     total_diff_l1 = 0
     computed_run = 0
     is_debugging = (debug_start_idx is not None) or (debug_end_idx is not None)
-    for run_idx, data in enumerate(datas):
-        if debug_start_idx is not None and run_idx < debug_start_idx:
-            continue
-        if debug_end_idx is not None and run_idx > debug_end_idx:
-            break
-        assert set(data.keys()) == {'event'}
-        data = data["event"]
-        if is_debugging:
-            json.dump(data, open("./example_vanilla.run", "w"), indent=4)
-        try:
-            floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
-        except UnknownCard as e:
-            print(f"{run_idx}: Unknown card '{e.card}'")
-            if e.card.lower().startswith("sk?"): # one or several runs in the dataset have this issue, maybe a localization issue from STS?
+    tokens = ALL_CARDS_FORMATTED + ALL_RELICS_FORMATTED
+
+    for source_json_path in source_json_paths:
+        datas = json.load(open(source_json_path, "r"))
+        datas = [data for data in datas if filter_run(data["event"])]
+        for run_idx, data in enumerate(datas):
+            if debug_start_idx is not None and run_idx < debug_start_idx:
                 continue
-            raise e
-        diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
-        total_diff_l1 += diff
-        if diff < 3:
-            draft_dataset += floor_samples
-        if diff or success:
-            if diff >= 1:
-                print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
-            computed_run += 1
-            total_diff_l0 += int(diff > 0)
+            if debug_end_idx is not None and run_idx > debug_end_idx:
+                break
+            assert set(data.keys()) == {'event'}
+            data = data["event"]
+            if is_debugging:
+                json.dump(data, open("./example_vanilla.run", "w"), indent=4)
+            try:
+                floor_samples, success, no_warning, delta_to_master = rebuild_deck_from_vanilla_run(data)
+            except UnknownCard as e:
+                print(f"{run_idx}: Unknown card '{e.card}'")
+                if e.card.lower().startswith("sk?"): # one or several runs in the dataset have this issue, maybe a localization issue from STS?
+                    continue
+                raise e
+            diff = len(delta_to_master.cards_added) + len(delta_to_master.cards_removed_or_transformed) + len(delta_to_master.cards_upgraded)
+            total_diff_l1 += diff
+            if diff < 3:
+                floor_samples = tokenize_dataset(floor_samples, tokens)
+                draft_dataset += floor_samples
+            if diff or success:
+                if diff >= 1:
+                    print(f"{run_idx}: diff = {diff} ; to add = {delta_to_master.cards_added} ; to remove = {delta_to_master.cards_removed_or_transformed} ; to upgrade = {delta_to_master.cards_upgraded}")
+                computed_run += 1
+                total_diff_l0 += int(diff > 0)
     print(f"Diff score over {computed_run} runs = {total_diff_l1}, {total_diff_l0} could not be reconstructed.")
 
     git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
     json_basename = ".".join(os.path.basename(source_json_path).split(".")[:-1])
     filepath = f"./{json_basename}_{git_hash}_{len(draft_dataset)}.data"
-    items = ALL_CARDS_FORMATTED + ALL_RELICS_FORMATTED
     data = {
         "dataset": draft_dataset,
-        "items": items,
+        "items": tokens,
     }
     json.dump(data, open(filepath, "w"))
-    print(f"Dumped dataset of {len(draft_dataset)} samples and {len(items)} tokens into {filepath}")
+    print(f"Dumped dataset of {len(draft_dataset)} samples and {len(tokens)} tokens into {filepath}")
 
 def compile_datas():
     """
@@ -1327,12 +1353,16 @@ def compile_datas():
     print(f"Done. Compiled {total_runs} runs")
 
 if __name__ == "__main__":
-    # create_dataset(
-    #     source_json_path = "./SlayTheData_win_a10+_ic_64298.json",
-    #     debug_start_idx = None,
-    #     debug_end_idx = None,
-    # )
-    compile_datas()
+    create_dataset(
+        source_json_path = [
+            "./SlayTheData_a10+_ic_0_100008.json",
+            "./SlayTheData_a10+_ic_1_100131.json",
+            "./SlayTheData_a10+_ic_2_128944.json",
+        ],
+        debug_start_idx = None,
+        debug_end_idx = None,
+    )
+    # compile_datas()
     # test_reconstruct()
     # test_reconstruct2()
     # test_reconstruct_easy()
