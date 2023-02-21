@@ -8,18 +8,17 @@ import os, os.path
 import json
 import torch
 
-from sts_ml.train import Model, TRAINING_DIR
-from sts_ml.model import count_parameters, load_dataloaders
+from sts_ml.train import TRAINING_DIR
+from sts_ml.model import count_parameters
+from sts_ml.registry import instanciate_model
 
 def generate_metrics(training_dirname):
 
     training_dir = os.path.join(".", TRAINING_DIR, training_dirname)
-    model = Model.load_model(training_dir, ckpt=None)
-    params = model.params
-    data_tokens, train_dataloader, val_dataloader = load_dataloaders(params)
+    model = instanciate_model(training_dir=training_dir)
+    train_dataloader, val_dataloader = model.load_dataloaders(model.params)
 
     metrics_df = pd.DataFrame()
-    batch_size = int(2**8)
     ckpt_filenames = glob(os.path.join(training_dir, "*.ckpt"))
     ckpts = [int(re.match(".*[^\d](\d+)\.ckpt", filename).groups()[0]) for filename in ckpt_filenames]
     order = np.argsort(ckpts)
@@ -90,11 +89,11 @@ def plot_training_metrics(training_dirname):
             plot_holed_values(epochs, list(df[key]), linestyle='dashed', color=theme[1])
     plt.legend()
     plt.show()
+    plt.savefig(os.path.join(training_dirname, "metrics.png"))
 
     print("Note: metrics are on a 'lower is better basis' so accuracy metrics are actually '1 - x'")
 
     return nonna_df.head(len(nonna_df))
-
 
 if __name__ == "__main__":
     training_dirname = ""

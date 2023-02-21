@@ -16,6 +16,7 @@ from torch.utils.data._utils import collate
 
 from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades, PAD_TOKEN, detokenize
 from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
+from sts_ml.params import NUM_DATALOADER_WORKERS
 
 PARAMS_FILENAME = "params.json"
 TOKENS_FILENAME = "tokens.json"
@@ -50,12 +51,18 @@ def unpad(sample):
 class StsDataset(IterableDataset):
     PAD_INDEX = 0
 
-    def __init__(self, params: dict, samples: list = None, tokens: list = None):
+    def __init__(self, params: dict, is_train_set: bool = None, tokens: list = None):
         self.is_empty = tokens is None
-        self.samples = samples
+        self.filepaths = params["train"]["dataset"]
+        self.is_train_set = is_train_set
         self.tokens = tokens
         self.params = params
         self.do_relics = params["model"]["input_relics"]
+        self.train_test_split = params["train"]["split"]
+        
+        self.count_down = 0
+        self.intra_permutation = []
+        self.inter_permutation = []
         assert tokens.index(PAD_TOKEN) == StsDataset.PAD_INDEX
 
     def token_to_index(self, token : str):
@@ -73,7 +80,37 @@ class StsDataset(IterableDataset):
 
     def sample_unpreprocessed(self):
         assert not self.is_empty
-        sample = random.choice(self.samples)
+        if self.params["train"]["data_sampling"] == "round":
+            if len(self.intra_permutation) == 0:
+                if len(self.inter_permutation) == 0:
+                    self.inter_permutation = np.random.permutation(len(self.filepaths)).tolist()
+                data = json.load(open(self.filepaths[self.inter_permutation.pop(0)], "r"))
+                self.samples = data["dataset"]
+                train_size = int(len(self.samples) * self.train_test_split)
+                val_size = len(self.samples) - train_size
+                if self.is_train_set:
+                    self.intra_permutation = np.random.permutation(train_size)
+                else:
+                    self.intra_permutation = np.random.permutation(len(self.samples) - train_size) + train_size
+                self.intra_permutation = self.intra_permutation.tolist()
+                print(f"[Partial dataset] Train ({train_size}) / validation ({val_size}) ratio")
+            sample = self.samples[self.intra_permutation.pop(0)]
+        elif self.params["train"]["data_sampling"] == "uniform":
+            if self.count_down == 0:
+                data = json.load(open(random.choice(self.filepaths), "r"))
+                self.samples = data["dataset"]
+                train_size = int(len(self.samples) * self.train_test_split)
+                val_size = len(self.samples) - train_size
+                if self.is_train_set:
+                    self.samples = self.samples[:train_size]
+                else:
+                    self.samples = self.samples[train_size:]
+                self.count_down = len(self.samples)
+                print(f"[Partial dataset] Train ({train_size}) / validation ({val_size}) ratio")
+            sample = random.choice(self.samples)
+            self.count_down -= 1
+        else:
+            raise NotImplementedError
         sample = detokenize(sample, self.tokens)
         return sample
 
@@ -102,34 +139,29 @@ class ModelAbc(nn.Module):
 
     @classmethod
     def load_datasets(cls, params):
-        data = json.load(open(params["train"]["dataset"], "r"))
+        data = json.load(open(params["train"]["dataset"][0], "r"))
         data_tokens = data["items"]
-        full_dataset = data["dataset"]
         
         if PAD_TOKEN not in data_tokens:
             data_tokens = [PAD_TOKEN] + data_tokens
 
         assert set(data_tokens).issubset(set(data_tokens) | set([PAD_TOKEN])), set.symmetric_difference(set(data_tokens), set(data_tokens) | set([PAD_TOKEN]))
 
-        split = params["train"]["split"]
-        train_val_split = int(split * len(full_dataset))
-
         train_dataset = cls.DatasetCls(
             params=params,
-            samples=full_dataset[:train_val_split],
             tokens=data_tokens,
+            is_train_set=True,
         )
         val_dataset = cls.DatasetCls(
             params=params,
-            samples=full_dataset[train_val_split:],
             tokens=data_tokens,
+            is_train_set=False,
         )
-        print(f"Train ({train_val_split}) / validation ({len(full_dataset) - train_val_split}) ratio = {split}")
 
         return data_tokens, train_dataset, val_dataset
 
     @classmethod
-    def dataset_to_dataloader(cls, params, dataset):
+    def dataset_to_dataloader(cls, params: dict, dataset: StsDataset):
         batch_size = params["train"]["batch_size"]
         device = get_available_device()
         dataloader = iter(DataLoader(
@@ -138,6 +170,7 @@ class ModelAbc(nn.Module):
             collate_fn=cls.DatasetCls.collate_fn,
             pin_memory=True,
             pin_memory_device=device,
+            num_workers=NUM_DATALOADER_WORKERS if dataset.is_train_set else 0,
         ))
         return dataloader
 

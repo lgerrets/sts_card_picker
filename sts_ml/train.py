@@ -1,3 +1,5 @@
+import copy
+import subprocess
 from typing import Callable, Union
 import torch
 import shutil
@@ -41,8 +43,7 @@ def train(model_cls: Union[CardModel, WinModel], state_dict: dict = None):
     model, train_dataloader, val_dataloader = model_cls.create_model()
 
     if state_dict is not None:
-        raise NotImplementedError("TODO")
-        model_cls.load_state_dict(state_dict)
+        model.load_state_dict(state_dict)
     params = model.params
     model.train()
 
@@ -52,6 +53,10 @@ def train(model_cls: Union[CardModel, WinModel], state_dict: dict = None):
         exp_name += "_relics"
     exp_dir = os.path.join(".", TRAINING_DIR, exp_name)
     os.makedirs(exp_dir)
+    params_cp = copy.deepcopy(params)
+    params_cp["runtime"] = {
+        "git_hash": subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip(),
+    }
     json.dump(params, open(os.path.join(exp_dir, PARAMS_FILENAME), "w"), indent=4)
     json.dump(model.tokens, open(os.path.join(exp_dir, TOKENS_FILENAME), "w"), indent=4)
     metrics_df = pd.DataFrame()
@@ -98,6 +103,6 @@ def pursue_training(training_dirname, ckpt):
     train(params, state_dict=state_dict)
 
 if __name__ == "__main__":
-    # train(model_cls=CardModel)
-    train(model_cls=WinModel)
+    train(model_cls=CardModel)
+    # train(model_cls=WinModel)
     # pursue_training()

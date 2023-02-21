@@ -16,8 +16,8 @@ from sts_ml.model_abc import StsDataset, ModelAbc, MHALayer, PARAMS_FILENAME, TO
 
 class WinDataset(StsDataset):
 
-    def __init__(self, params: dict, samples: list = None, tokens: list = None):
-        super().__init__(params, samples, tokens)
+    def __init__(self, params: dict, is_train_set: bool = None, tokens: list = None):
+        super().__init__(params, is_train_set, tokens)
         self.gamma = params["model"]["gamma"]
         
     def preprocess(self, sample: dict):

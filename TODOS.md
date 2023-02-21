@@ -5,6 +5,7 @@
 - Do proper epochs ie traverse the whole, shuffled, dataset
 - Did not check that state of relics is well reconstructed in deck_history.py
 - We currently tokenize/detokenize/tokenize. This may be ok though.
+- WinModel does not seem to converge well, try a kind of sigmoid loss?
 
 ## .run processing
 

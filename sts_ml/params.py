@@ -1,13 +1,21 @@
+import os
+
+NUM_DATALOADER_WORKERS = 0 # set this to 0 or >= 2
 
 card_predictor_params = {
     "train": {
         "lr": 1e-4,
         "split": 0.8,
         # "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1168512.data",
-        "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1957.data",
+        # "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1957.data",
+        "dataset": [
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932",
+        ],
         "batch_size": 256,
+        "data_sampling": "round", # one of "uniform", "round"
     },
     "model": {
+        "model_cls": "CardModel",
         "dim": 256,
         "nheads": 4,
         # "ffdim": 512,
@@ -18,19 +26,20 @@ card_predictor_params = {
     },
 }
 
-card_predictor_params["model"]["ffdim"] = card_predictor_params["model"].get("ffdim", card_predictor_params["model"]["dim"] * 2) # default to 2*dim if missing
-card_predictor_params["model"]["input_relics"] = card_predictor_params["model"].get("input_relics", False) # default to False if missing
-
 win_predictor_params = {
     "train": {
         "lr": 1e-4,
         "split": 0.8,
         # "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1168512.data",
         # "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1957.data",
-        "dataset": "./SlayTheData_a10+_ic_2_128944_944114b_3712932.data",
+        "dataset": [
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932",
+        ],
         "batch_size": 256,
+        "data_sampling": "round", # one of "uniform", "round"
     },
     "model": {
+        "model_cls": "WinModel",
         "dim": 256,
         "nheads": 4,
         # "ffdim": 512,
@@ -41,5 +50,11 @@ win_predictor_params = {
     },
 }
 
-win_predictor_params["model"]["ffdim"] = win_predictor_params["model"].get("ffdim", win_predictor_params["model"]["dim"] * 2) # default to 2*dim if missing
-win_predictor_params["model"]["input_relics"] = win_predictor_params["model"].get("input_relics", False) # default to False if missing
+for params in [card_predictor_params, win_predictor_params]:
+    params["model"]["ffdim"] = params["model"].get("ffdim", params["model"]["dim"] * 2) # default to 2*dim if missing
+    params["model"]["input_relics"] = params["model"].get("input_relics", False) # default to False if missing
+    if os.path.isdir(params["train"]["dataset"][0]):
+        assert len(params["train"]["dataset"]) == 1
+        dirpath = params["train"]["dataset"][0]
+        filenames = os.listdir(dirpath)
+        params["train"]["dataset"] = [os.path.join(dirpath, filename) for filename in filenames]

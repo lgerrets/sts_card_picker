@@ -1330,6 +1330,25 @@ def create_dataset(
     json.dump(data, open(filepath, "w"))
     print(f"Dumped dataset of {len(draft_dataset)} samples and {len(tokens)} tokens into {filepath}")
 
+def split_dataset(path: str, splits: int):
+    assert path.endswith(".data")
+    new_dir = path[:-5]
+    os.makedirs(new_dir, exist_ok=True)
+    data = json.load(open(path, "r"))
+
+    size = len(data["dataset"])
+    idx = 0
+    start = 0
+    while idx < splits:
+        end = min(start + int(size / splits), size)
+        subdata = {
+            "dataset": data["dataset"][start:end],
+            "items": data["items"],
+        }
+        json.dump(subdata, open(os.path.join(new_dir, f"{idx}.data"), "w"))
+        start = end
+        idx += 1
+
 def compile_datas():
     """
     From .json batches of runs in ./SlayTheData, filter out by character class / wins / ascension level...
@@ -1391,4 +1410,5 @@ if __name__ == "__main__":
     # test_reconstruct()
     # test_reconstruct2()
     # test_reconstruct_easy()
+    # split_dataset("SlayTheData_a10+_ic_2_128944_944114b_3712932.data", 10)
 
