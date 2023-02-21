@@ -26,7 +26,8 @@ win_predictor_params = {
         "lr": 1e-4,
         "split": 0.8,
         # "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1168512.data",
-        "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1957.data",
+        # "dataset": "./SlayTheData_win_a10+_ic_64298_fb5dcd7_1957.data",
+        "dataset": "./SlayTheData_a10+_ic_2_128944_944114b_3712932.data",
         "batch_size": 256,
     },
     "model": {

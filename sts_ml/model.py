@@ -67,6 +67,13 @@ class DeckDataset(StsDataset):
         return ret
 
 class CardModel(ModelAbc):
+    DatasetCls = DeckDataset
+    
+    @classmethod
+    def create_model(cls):
+        from sts_ml.params import card_predictor_params
+        ret = super().create_model(card_predictor_params)
+        return ret
     
     def __init__(self, params, tokens=None) -> None:
         super().__init__(params, tokens)

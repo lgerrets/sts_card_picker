@@ -10,9 +10,9 @@ from torch.utils.data import IterableDataset, DataLoader
 from torch.utils.data._utils import collate
 
 from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades
-from sts_ml.model import PARAMS_FILENAME, TOKENS_FILENAME, CARD_AND_RELIC_TOKENS, PAD_TOKEN, CARD_TOKENS, PoolTimeDimension, MHALayer, torch_to_numpy, numpy_to_torch
+from sts_ml.model import MHALayer
 from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
-from sts_ml.model_abc import StsDataset, ModelAbc, MHALayer
+from sts_ml.model_abc import StsDataset, ModelAbc, MHALayer, PARAMS_FILENAME, TOKENS_FILENAME, PAD_TOKEN, PoolTimeDimension
 
 class WinDataset(StsDataset):
 
@@ -109,6 +109,13 @@ class WinDataset(StsDataset):
         return ret
 
 class WinModel(ModelAbc):
+    DatasetCls = WinDataset
+
+    @classmethod
+    def create_model(cls):
+        from sts_ml.params import win_predictor_params
+        ret = super().create_model(win_predictor_params)
+        return ret
 
     def __init__(self, params, tokens=None) -> None:
         super().__init__(params, tokens)        
@@ -134,7 +141,6 @@ class WinModel(ModelAbc):
         self.to(device)
 
         self.opt = torch.optim.Adam(self.parameters(), lr=params["train"]["lr"])
-
     
     def forward(self, batch):
         """

@@ -11,7 +11,9 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from sts_ml.model import PAD_TOKEN, Model, PARAMS_FILENAME, TOKENS_FILENAME
+from sts_ml.deck_history import PAD_TOKEN
+from sts_ml.model_abc import PARAMS_FILENAME, TOKENS_FILENAME
+from sts_ml.model import CardModel
 from sts_ml.win_model import WinModel
 from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
 
@@ -35,7 +37,7 @@ def gen_ckpt_idxes(asymptot):
         idx += delta
         yield idx
 
-def train(model_cls: Union[Model, WinModel], state_dict: dict = None):
+def train(model_cls: Union[CardModel, WinModel], state_dict: dict = None):
     model, train_dataloader, val_dataloader = model_cls.create_model()
 
     if state_dict is not None:
@@ -96,6 +98,6 @@ def pursue_training(training_dirname, ckpt):
     train(params, state_dict=state_dict)
 
 if __name__ == "__main__":
-    # train(model_cls=Model)
+    # train(model_cls=CardModel)
     train(model_cls=WinModel)
     # pursue_training()

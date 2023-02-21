@@ -74,7 +74,7 @@ class StsDataset(IterableDataset):
     def sample_unpreprocessed(self):
         assert not self.is_empty
         sample = random.choice(self.samples)
-        sample = detokenize(sample)
+        sample = detokenize(sample, self.tokens)
         return sample
 
     def __iter__(self):
@@ -95,10 +95,9 @@ class ModelAbc(nn.Module):
         return model
 
     @classmethod
-    def create_model(cls):
-        from sts_ml.params import card_predictor_params
-        data_tokens, train_dataloader, val_dataloader = cls.load_dataloaders(card_predictor_params)
-        model = cls(card_predictor_params, tokens=data_tokens)
+    def create_model(cls, params: dict):
+        data_tokens, train_dataloader, val_dataloader = cls.load_dataloaders(params)
+        model = cls(params, tokens=data_tokens)
         return model, train_dataloader, val_dataloader
 
     @classmethod
@@ -145,10 +144,10 @@ class ModelAbc(nn.Module):
     @classmethod
     def load_dataloaders(cls, params):
 
-        data_tokens, train_dataset, val_dataset = cls.DatasetCls.load_datasets(params)
+        data_tokens, train_dataset, val_dataset = cls.load_datasets(params)
 
-        train_dataloader = cls.DatasetCls.dataset_to_dataloader(params, train_dataset)
-        val_dataloader = cls.DatasetCls.dataset_to_dataloader(params, val_dataset)
+        train_dataloader = cls.dataset_to_dataloader(params, train_dataset)
+        val_dataloader = cls.dataset_to_dataloader(params, val_dataset)
 
         return data_tokens, train_dataloader, val_dataloader
 

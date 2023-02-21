@@ -1249,26 +1249,26 @@ def tokenize_dataset(databatch: list, tokens: list):
                 processed_keys.append(key)
     return databatch
 
-def detokenize(databatch: list, tokens: list):
+def detokenize(sample: dict, tokens: list):
     to_process_keys = ['relics', 'deck', 'cards_picked', 'cards_skipped']
-    for sample in databatch:
-        processed_keys = []
-        for key in sample:
-            if key in to_process_keys:
-                old_list = sample[key]
-                new_list = []
-                for item in old_list:
-                    splits = item.split("+")
-                    token_idx = int(splits[0])
-                    name = tokens[token_idx]
-                    new_name = name
-                    if len(splits) > 1:
-                        n_upgrades = splits[1]
-                        new_name += f"+{n_upgrades}"
-                    new_list.append(new_name)
-                sample[key] = new_list
-                processed_keys.append(key)
-    return databatch
+    processed_keys = []
+    sample = copy.deepcopy(sample)
+    for key in sample:
+        if key in to_process_keys:
+            old_list = sample[key]
+            new_list = []
+            for item in old_list:
+                splits = item.split("+")
+                token_idx = int(splits[0])
+                name = tokens[token_idx]
+                new_name = name
+                if len(splits) > 1:
+                    n_upgrades = splits[1]
+                    new_name += f"+{n_upgrades}"
+                new_list.append(new_name)
+            sample[key] = new_list
+            processed_keys.append(key)
+    return sample
 
 def create_dataset(
     source_json_path,
