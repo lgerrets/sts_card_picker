@@ -6,6 +6,7 @@
 - Did not check that state of relics is well reconstructed in deck_history.py
 - We currently tokenize/detokenize/tokenize. This may be ok though.
 - WinModel does not seem to converge well, try a kind of sigmoid loss?
+- Adding floor embeddings seems to have helped, as one could expect. But it converges very fast which makes me think that it overfits on that. TODO: Try floor to make floor as a separate token
 
 ## .run processing
 

@@ -65,9 +65,12 @@ def plot_training_metrics(training_dirname):
         ("blue", "cyan"),
         ("orange", "yellow"),
         ("green", "lime"),
+        ("brown", "red"),
+        ("purple", "pink"),
         ("black", "grey"),
     ]
     loss_name_to_color_theme = {}
+    theme_idx = 0
 
     nonna_df = df
     for key in df.columns:
@@ -80,7 +83,8 @@ def plot_training_metrics(training_dirname):
             loss_name = key.split("val_")[-1]
         if loss_name is not None:
             if loss_name not in loss_name_to_color_theme:
-                loss_name_to_color_theme[loss_name] = themes.pop(0)
+                loss_name_to_color_theme[loss_name] = themes[theme_idx % len(themes)]
+                theme_idx += 1
             theme = loss_name_to_color_theme[loss_name]
         
         if key.startswith("training"):
@@ -89,7 +93,7 @@ def plot_training_metrics(training_dirname):
             plot_holed_values(epochs, list(df[key]), linestyle='dashed', color=theme[1])
     plt.legend()
     plt.show()
-    plt.savefig(os.path.join(training_dirname, "metrics.png"))
+    plt.savefig(os.path.join(TRAINING_DIR, training_dirname, "metrics.png"))
 
     print("Note: metrics are on a 'lower is better basis' so accuracy metrics are actually '1 - x'")
 

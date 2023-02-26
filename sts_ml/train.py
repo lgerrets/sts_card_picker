@@ -85,7 +85,7 @@ def train(model_cls: Union[CardModel, WinModel], state_dict: dict = None):
             next_epock_save_idx = next(ckpt_idxes)
             torch.save(model.state_dict(), os.path.join(exp_dir, f"{epoch}.ckpt"))
 
-        print(metrics_row)
+            print(metrics_row)
         row_df = pd.DataFrame(metrics_row, index=[0])
         metrics_df = pd.concat([metrics_df, row_df], ignore_index=True)
         save_df(metrics_df, metrics_filepath)
@@ -103,6 +103,6 @@ def pursue_training(training_dirname, ckpt):
     train(params, state_dict=state_dict)
 
 if __name__ == "__main__":
-    train(model_cls=CardModel)
-    # train(model_cls=WinModel)
+    # train(model_cls=CardModel)
+    train(model_cls=WinModel)
     # pursue_training()

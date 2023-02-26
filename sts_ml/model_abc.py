@@ -126,7 +126,7 @@ class ModelAbc(nn.Module):
         params = json.load(open(os.path.join(training_dir, PARAMS_FILENAME), "r"))
         tokens = json.load(open(os.path.join(training_dir, TOKENS_FILENAME), "r"))
         model = cls(params=params, tokens=tokens)
-        model.dataset = cls.DatasetCls(samples=None, tokens=tokens, do_relics=model.input_relics)
+        model.dataset = cls.DatasetCls(params=params, tokens=tokens)
         if ckpt is not None:
             model.load_state_dict(torch.load(os.path.join(training_dir, f"{ckpt}.ckpt")))
         return model
@@ -322,3 +322,32 @@ class PoolTimeDimension(nn.Module):
         out = self.output_nn(dots) # -> bs, dim
 
         return out
+
+class PositionalEncoding(nn.Module):
+    """
+    cf https://kazemnejad.com/blog/transformer_architecture_positional_encoding/
+    """
+    def __init__(self, dim: int, do_phases=True):
+        super().__init__()
+
+        self.dim = dim
+
+        # frequencies
+        exponents = torch.repeat_interleave(torch.arange(0, self.dim, 2) / self.dim, 2)[:self.dim]
+        self.w_k = torch.pow(1 / 10000, exponents)
+        self.w_k = self.w_k.reshape((1,-1))
+        self.w_k = nn.Parameter(self.w_k, requires_grad=False)
+
+        # phases
+        self.do_phases = do_phases
+        if do_phases:
+            self.phi_k = (torch.arange(2) * np.pi/2).repeat(int((self.dim + 1) / 2))[:self.dim]
+            self.phi_k = self.phi_k.reshape((1,-1))
+            self.phi_k = nn.Parameter(self.phi_k, requires_grad=False)
+    
+    def forward(self, positions: torch.Tensor):
+        positions = positions.reshape((-1,1))
+        xs = self.w_k * positions
+        if self.do_phases:
+            xs += self.phi_k
+        return torch.sin(xs)

@@ -12,7 +12,7 @@ from torch.utils.data._utils import collate
 from sts_ml.deck_history import ALL_CARDS_FORMATTED, ALL_RELICS_FORMATTED, card_to_name, card_to_n_upgrades
 from sts_ml.model import MHALayer
 from sts_ml.helper import count_parameters, torch_to_numpy, numpy_to_torch, save_df, get_available_device
-from sts_ml.model_abc import StsDataset, ModelAbc, MHALayer, PARAMS_FILENAME, TOKENS_FILENAME, PAD_TOKEN, PoolTimeDimension
+from sts_ml.model_abc import StsDataset, ModelAbc, MHALayer, PARAMS_FILENAME, TOKENS_FILENAME, PAD_TOKEN, PoolTimeDimension, PositionalEncoding
 
 class WinDataset(StsDataset):
 
@@ -66,6 +66,7 @@ class WinDataset(StsDataset):
             "token_idxes": idxes,
             "items_n": items_n,
             "n_upgrades": n_upgrades,
+            "floor": current_floor,
             "win_score": victory_score,
             "heart_win_score": heart_win_score,
             "heart_win_score_is_known": heart_win_score_is_known,
@@ -94,17 +95,13 @@ class WinDataset(StsDataset):
             sample["n_pad_lefts"] = n_pad_left
         
         ret = {}
-        for key in [
-            "token_idxes",
-            "n_upgrades",
-            "win_score",
-            "heart_win_score",
-            "heart_win_score_is_known",
-        ]:
-            ret[key] = collate.default_collate([sample[key] for sample in samples])
         
-        for key in ["items_n", "n_pad_lefts"]:
-            ret[key] = np.array([sample[key] for sample in samples])
+        non_tensor_keys = ["items_n", "n_pad_lefts"]
+        for key in sample:
+            if key in non_tensor_keys:
+                ret[key] = np.array([sample[key] for sample in samples])
+            else:
+                ret[key] = collate.default_collate([sample[key] for sample in samples])
 
         return ret
 
@@ -121,7 +118,12 @@ class WinModel(ModelAbc):
         super().__init__(params, tokens)        
 
         dim = self.dim
-        self.embedding = nn.Embedding(len(tokens), dim)
+        
+        n_custom_embeddings = 1
+        self.embedding = nn.Embedding(len(tokens), dim-n_custom_embeddings)
+        
+        self.floor_encoding = PositionalEncoding(self.dim, do_phases=False) # contrarily to how PE is used in transformers (eg encode the time dimension), we use it to encode the floor, and we use it in a different way; moreover, this could be argued, but here we disable phases because the original authors did it for a specific reason that we are not really concerned with (eg help transformer models understand that a delta of positions of 1 is very different than 2 in text sentences; in our case, deck winrates at floors x and x+1 are pretty similar)
+
         if params["model"]["block_class"] == "MHALayer":
             blocks = [MHALayer(
                 dim=dim,
@@ -156,10 +158,16 @@ class WinModel(ModelAbc):
         n_upgrades = batch["n_upgrades"]
 
         feat = self.embedding(idxes)
+
+        # scalar #0 of embedding encodes whether this is an upgraded card
         n_upgrades = torch.clip(n_upgrades, 0, 1) # TODO: we lose the nb of upgrades of searing blow
-        for idx, n_upgrade in enumerate(n_upgrades):
-            # scalar #1 of embedding encodes whether this is an upgraded card
-            feat[idx,:,1] = n_upgrade
+        assert n_upgrades.shape == (bs, seqlen)
+        n_upgrades = torch.reshape(n_upgrades, (bs, seqlen, 1))
+        feat = torch.concat([n_upgrades, feat], dim=2)
+
+        floor_encodings = self.floor_encoding.forward(batch["floor"])
+        floor_encodings = torch.reshape(floor_encodings, (bs, 1, self.dim))
+        feat += floor_encodings # add rather than concatenate on the feature dimension, as they do in transformers; also we add the same floor_embedding to every embedding accross seqlen (I argue that it would be semantically wrong to make it its own token ie concatenate on the seqlen dimension, but TODO experiment)
         
         kwargs = {}
         if self.params["model"]["block_class"] == "MHALayer":
