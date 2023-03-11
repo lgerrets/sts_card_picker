@@ -103,6 +103,6 @@ def pursue_training(training_dirname, ckpt):
     train(params, state_dict=state_dict)
 
 if __name__ == "__main__":
-    # train(model_cls=CardModel)
-    train(model_cls=WinModel)
+    train(model_cls=CardModel)
+    # train(model_cls=WinModel)
     # pursue_training()

@@ -238,5 +238,9 @@ class CardModel(ModelAbc):
     
     def sample_to_tokens(self, sample):
         tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
+
+        if self.input_relics:
+            tokens = sample["relics"] + tokens
+        
         return tokens
 

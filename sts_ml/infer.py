@@ -56,9 +56,15 @@ def plot_training_metrics(training_dirname):
     plt.grid()
     plt.xlim(epochs[0], epochs[-1])
 
+    class YLims:
+        y_low = np.infty
+        y_high = - np.infty
+    
     def plot_holed_values(epochs, values, linestyle, color):
         xs = [x for x,val in zip(epochs, values) if not math.isnan(val)]
         ys = [val for x,val in zip(epochs, values) if not math.isnan(val)]
+        YLims.y_low = min(YLims.y_low, min(ys[-5:]))
+        YLims.y_high = max(YLims.y_high, max(ys[-5:]))
         plt.plot(xs, ys, linestyle=linestyle, color=color)
 
     themes = [
@@ -91,6 +97,8 @@ def plot_training_metrics(training_dirname):
             plt.plot(epochs, list(df[key]), label=loss_name, color=theme[0])
         elif key.startswith("val"):
             plot_holed_values(epochs, list(df[key]), linestyle='dashed', color=theme[1])
+    
+    plt.ylim(YLims.y_low, YLims.y_high)
     plt.legend()
     plt.show()
     plt.savefig(os.path.join(TRAINING_DIR, training_dirname, "metrics.png"))

@@ -139,6 +139,8 @@ class WinModel(ModelAbc):
         self.pool = PoolTimeDimension(dim)
         self.projection = nn.Linear(dim, 2)
 
+        self.do_concat_floor_embedding = params["model"].get("do_concat_floor_embedding", False)
+
         self.device = device = "cuda" if torch.cuda.is_available() else "cpu"
         self.to(device)
 
@@ -166,8 +168,12 @@ class WinModel(ModelAbc):
         feat = torch.concat([n_upgrades, feat], dim=2)
 
         floor_encodings = self.floor_encoding.forward(batch["floor"])
+        assert floor_encodings.shape == (bs, self.dim)
         floor_encodings = torch.reshape(floor_encodings, (bs, 1, self.dim))
-        feat += floor_encodings # add rather than concatenate on the feature dimension, as they do in transformers; also we add the same floor_embedding to every embedding accross seqlen (I argue that it would be semantically wrong to make it its own token ie concatenate on the seqlen dimension, but TODO experiment)
+        if self.do_concat_floor_embedding:
+            feat = torch.concat([floor_encodings, feat], dim=1)
+        else:
+            feat += floor_encodings # add rather than concatenate on the feature dimension, as they do in transformers; also we add the same floor_embedding to every embedding accross seqlen (I argue that it would be semantically wrong to make it its own token ie concatenate on the seqlen dimension, but TODO experiment)
         
         kwargs = {}
         if self.params["model"]["block_class"] == "MHALayer":
@@ -180,8 +186,9 @@ class WinModel(ModelAbc):
         
         feat = self.pool(feat)
 
-        feat = self.projection(feat)
-        logits = torch.tanh(feat)
+        logits = self.projection(feat)
+        
+        # logits = torch.tanh(logits)
 
         return logits
     
@@ -267,5 +274,12 @@ class WinModel(ModelAbc):
         self.last_sample = copy.deepcopy(sample)
     
     def sample_to_tokens(self, sample):
-        tokens = sample["deck"]
+        tokens = sample["deck"] + sample["cards_picked"]
+
+        if self.input_relics:
+            tokens = sample["relics"] + tokens
+
+        if self.do_concat_floor_embedding:
+            tokens = [sample["floor"]] + tokens
+
         return tokens

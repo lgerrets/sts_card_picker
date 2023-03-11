@@ -1,3 +1,4 @@
+import warnings
 import random
 import json
 import shutil
@@ -53,12 +54,25 @@ class StsDataset(IterableDataset):
 
     def __init__(self, params: dict, is_train_set: bool = None, tokens: list = None):
         self.is_empty = tokens is None
-        self.filepaths = params["train"]["dataset"]
         self.is_train_set = is_train_set
+        self.train_test_split = params["train"]["split"]
+        filepaths = params["train"]["dataset"]
+        if isinstance(filepaths, str):
+            filepaths = [filepaths] # backward compat
+        train_n_files = int(self.train_test_split * len(filepaths))
+        val_n_files = len(filepaths) - train_n_files
+        print(f"Files train/val split is {train_n_files} / {val_n_files}")
+        if (train_n_files == 0) or (val_n_files == 0):
+            warnings.warn("Train/val is at least partially incorrect because this case is not supported", UserWarning)
+            train_n_files = max(train_n_files, 1)
+            val_n_files = max(val_n_files, 1)
+        if self.is_train_set:
+            self.filepaths = filepaths[:train_n_files]
+        else:
+            self.filepaths = filepaths[-val_n_files:]
         self.tokens = tokens
         self.params = params
         self.do_relics = params["model"]["input_relics"]
-        self.train_test_split = params["train"]["split"]
         
         self.count_down = 0
         self.intra_permutation = []
@@ -80,37 +94,28 @@ class StsDataset(IterableDataset):
 
     def sample_unpreprocessed(self):
         assert not self.is_empty
-        if self.params["train"]["data_sampling"] == "round":
-            if len(self.intra_permutation) == 0:
+        data_sampling = self.params["train"].get("data_sampling", "round")
+        if data_sampling == "round": # simulates going through the entire dataset randomly (at any time, there exists n such that all samples are seen n or n+1 times)
+            if self.count_down == 0:
                 if len(self.inter_permutation) == 0:
                     self.inter_permutation = np.random.permutation(len(self.filepaths)).tolist()
                 data = json.load(open(self.filepaths[self.inter_permutation.pop(0)], "r"))
                 self.samples = data["dataset"]
-                train_size = int(len(self.samples) * self.train_test_split)
-                val_size = len(self.samples) - train_size
-                if self.is_train_set:
-                    self.intra_permutation = np.random.permutation(train_size)
-                else:
-                    self.intra_permutation = np.random.permutation(len(self.samples) - train_size) + train_size
-                self.intra_permutation = self.intra_permutation.tolist()
-                print(f"[Partial dataset] Train ({train_size}) / validation ({val_size}) ratio")
+                self.intra_permutation = np.random.permutation(len(self.samples)).tolist()
+                self.count_down = len(self.samples)
+                print(f"[Partial dataset] {len(self.samples)}")
             sample = self.samples[self.intra_permutation.pop(0)]
-        elif self.params["train"]["data_sampling"] == "uniform":
+        elif data_sampling == "uniform": # similar to "round" except, in a sub batch of the dataset, we sample with replacement, so some samples will likely be seen more than others
             if self.count_down == 0:
                 data = json.load(open(random.choice(self.filepaths), "r"))
                 self.samples = data["dataset"]
-                train_size = int(len(self.samples) * self.train_test_split)
-                val_size = len(self.samples) - train_size
-                if self.is_train_set:
-                    self.samples = self.samples[:train_size]
-                else:
-                    self.samples = self.samples[train_size:]
+                self.samples = self.samples[np.random.permutation(len(self.samples))]
                 self.count_down = len(self.samples)
-                print(f"[Partial dataset] Train ({train_size}) / validation ({val_size}) ratio")
+                print(f"[Partial dataset] {len(self.samples)}")
             sample = random.choice(self.samples)
-            self.count_down -= 1
         else:
-            raise NotImplementedError
+            raise NotImplementedError(data_sampling)
+        self.count_down -= 1
         sample = detokenize(sample, self.tokens)
         return sample
 
@@ -139,7 +144,10 @@ class ModelAbc(nn.Module):
 
     @classmethod
     def load_datasets(cls, params):
-        data = json.load(open(params["train"]["dataset"][0], "r"))
+        example_dataset = params["train"]["dataset"] # both a list and a string are supported (mostly for backward compat)
+        if isinstance(params["train"]["dataset"], list):
+            example_dataset = example_dataset[0]
+        data = json.load(open(example_dataset, "r"))
         data_tokens = data["items"]
         
         if PAD_TOKEN not in data_tokens:
@@ -203,7 +211,7 @@ class ModelAbc(nn.Module):
 
     def preprocess_one(self, sample: dict):
         preprocessed_sample = self.dataset.preprocess(sample)
-        batch = self.DeckDataset.collate_fn([preprocessed_sample])
+        batch = self.DatasetCls.collate_fn([preprocessed_sample])
         # batch = self._to_device(batch)
         return batch
 
@@ -230,18 +238,17 @@ class ModelAbc(nn.Module):
         attn_weights = attn_weights_all[sample_idx, head_idx]
 
         print(f"Attention weights for layer #{block_idx}/{len(self.blocks)-1}, head #{head_idx}/{nheads-1}.")
-        print("This shows eg 'the output embedding (at row R) attends this much to input embeddings (at columns C)'")
+        print("This shows eg 'the output embedding (at column C) attends this much to input embeddings (at rows R)'")
         
         tokens = self.sample_to_tokens(sample)
 
-        if self.input_relics:
-            tokens = sample["relics"] + tokens
         n_tokens = len(tokens)
         assert len(attn_weights.shape) == 2, attn_weights_all.shape
         attn_weights = attn_weights[-n_tokens:, -n_tokens:]
         
         df = pd.DataFrame(attn_weights)
         df = df.rename(columns=lambda idx: f"{idx} {tokens[idx]}", index=lambda idx: f"{idx} {tokens[idx]}")
+        df = df.transpose()
         
         styler = df
         styler = styler.style.background_gradient(cmap=cm)

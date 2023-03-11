@@ -47,6 +47,7 @@ win_predictor_params = {
         "block_class": "MHALayer", # MHALayer, Linear
         "input_relics": True,
         "gamma": 0.95,
+        "do_concat_floor_embedding": True,
     },
 }
 
