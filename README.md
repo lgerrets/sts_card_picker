@@ -16,35 +16,39 @@ My bot achieves ~55% accuracy on the left-out test dataset. As a comparison, not
 
 Windows only, in a powershell:
 
-> Install-Module -Name Set-PsEnv
-
-> Set-Alias -Name dotenv -Value Set-PsEnv
+```
+Install-Module -Name Set-PsEnv
+Set-Alias -Name dotenv -Value Set-PsEnv
+```
 
 All platforms:
 
-> dotenv
+```
+dotenv
+python -m venv env
+./env/scripts/activate
+pip install -r requirements.txt
 
-> python -m venv env
-
-> ./env/scripts/activate
-
-> pip install -r requirements.txt
+cd external
+git clone https://github.com/ForgottenArbiter/spirecomm
+```
 
 As a dev environment, I use VSCode which has great python and jupyter extensions.
 
 ### Run
 
-> dotenv
-
-> ./env/scripts/activate
+```
+dotenv
+./env/scripts/activate
+```
 
 It's recommended to first look at [main.ipynb](main.ipynb) and optionnally run it.
 
 Then, the files to look at in the order of the workflow are:
 
-> python sts_ml/deck_history.py
-
-> python sts_ml/train.py
-
-> python sts_ml/infer.py
+```
+python sts_ml/deck_history.py
+python sts_ml/train.py
+python sts_ml/infer.py
+```
 

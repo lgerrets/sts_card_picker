@@ -235,6 +235,8 @@ class CardModel(ModelAbc):
         print(losses)
         self.just_predicted_one = True
         self.last_sample = copy.deepcopy(sample)
+
+        return offered_cards, pick_logits_np
     
     def sample_to_tokens(self, sample):
         tokens = sample["deck"] + sample["cards_picked"] + sample["cards_skipped"]
