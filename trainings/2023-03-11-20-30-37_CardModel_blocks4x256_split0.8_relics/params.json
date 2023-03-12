@@ -1,0 +1,30 @@
+{
+    "train": {
+        "lr": 0.0001,
+        "split": 0.8,
+        "dataset": [
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\0.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\1.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\2.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\3.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\4.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\5.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\6.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\7.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\8.data",
+            "./SlayTheData_a10+_ic_2_128944_944114b_3712932\\9.data"
+        ],
+        "batch_size": 256,
+        "data_sampling": "round"
+    },
+    "model": {
+        "model_cls": "CardModel",
+        "dim": 256,
+        "nheads": 4,
+        "blocks": 4,
+        "block_class": "MHALayer",
+        "mask_inter_choices": false,
+        "input_relics": true,
+        "ffdim": 512
+    }
+}

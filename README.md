@@ -1,5 +1,12 @@
 # SlayTheSpire Card Picker
 
+## Features
+
+- Process vanilla .run files to try to determine what was the state of the deck and relics at each card rewards and shop decisions
+- Train and use deep AIs from human data
+  - Uses 'multi head attention' to best deal with the varying size of the inputs (eg deck size and relics)
+- GUI assistant that hooks into STS to make predictions at card rewards and shops, using CommunicationMod
+
 ## What?
 
 The goal is to teach an AI to pick cards at card rewards after combats, or at shops, or generally at any point where a 'draft' type of decision must be made. We aim to make it learn based on data of (hopefully expert) human runs.
@@ -10,9 +17,7 @@ Then, we train a model (using one particular type of deep neural network that ha
 
 My bot achieves ~55% accuracy on the left-out test dataset. As a comparison, note that a bot that just skips all cards has 32% accuracy on my data, and a bot that picks one randomly has 25% accuracy (indeed most of the time picks are 1 out of 4 options).
 
-## For devs
-
-### Install
+## Minimal requirements
 
 Windows only, in a powershell:
 
@@ -28,21 +33,47 @@ dotenv
 python -m venv env
 ./env/scripts/activate
 pip install -r requirements.txt
+```
 
+As a dev environment, I recommend VSCode which has great python and jupyter extensions.
+
+## Human assistant GUI
+
+This part was made possible by the great works from ForgottenArbiter at https://github.com/ForgottenArbiter/CommunicationMod and https://github.com/ForgottenArbiter/spirecomm
+
+### Install
+
+Additional setup:
+
+```
 cd external
 git clone https://github.com/ForgottenArbiter/spirecomm
 ```
 
-As a dev environment, I use VSCode which has great python and jupyter extensions.
+Also get the mod CommunicationMod eg through Steam. Then edit your game's `...\ModTheSpire\CommunicationMod\config.properties`
+
+```
+command=...\\sts_card_picker\\env\\Scripts\\python.exe ...\\sts_card_picker\\gui_card_assistant.py
+```
 
 ### Run
+
+Run STS. Click Mods > CommunicationMod > Start process.
+
+A window should pop up. If not, error logs are dumped into `...\\sts_card_picker\\gui.log`
+
+Play the game normally. At card rewards and shops, the GUI should automatically update and show you scores for each card.
+
+Example: [img](doc/gui_assistant.png)
+
+## Train a model
 
 ```
 dotenv
 ./env/scripts/activate
 ```
 
-It's recommended to first look at [main.ipynb](main.ipynb) and optionnally run it.
+First look at [main.ipynb](main.ipynb) which has more detailed documentation, and optionnally run it.
 
 Then, the files to look at in the order of the workflow are:
 
